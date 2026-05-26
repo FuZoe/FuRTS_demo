@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FuRTS - 文字版即时战略游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #111;
+  color: #0f0;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+  user-select: none;
+}
+#gameCanvas {
+  display: block;
+  cursor: crosshair;
+}
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: rgba(0,0,0,0.85);
+  border-bottom: 1px solid #0a0;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 14px;
+  z-index: 10;
+  gap: 24px;
+}
+.hud-item { white-space: nowrap; }
+.hud-label { color: #0a0; }
+.hud-value { color: #0f0; font-weight: bold; }
+#sidebar {
+  position: fixed;
+  top: 36px;
+  right: 0;
+  width: 220px;
+  bottom: 0;
+  background: rgba(0,0,0,0.85);
+  border-left: 1px solid #0a0;
+  padding: 10px;
+  font-size: 12px;
+  z-index: 10;
+  overflow-y: auto;
+}
+#sidebar h3 {
+  color: #0f0;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #0a0;
+  padding-bottom: 4px;
+}
+.btn {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  padding: 6px 8px;
+  background: #020;
+  color: #0f0;
+  border: 1px solid #0a0;
+  cursor: pointer;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  text-align: left;
+}
+.btn:hover { background: #040; }
+.btn:disabled { color: #050; border-color: #030; cursor: not-allowed; }
+.btn .cost { color: #0a0; float: right; }
+#info {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid #0a0;
+  line-height: 1.6;
+}
+#minimap {
+  margin-top: 10px;
+  border: 1px solid #0a0;
+  background: #000;
+}
+#log {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 220px;
+  height: 80px;
+  background: rgba(0,0,0,0.85);
+  border-top: 1px solid #0a0;
+  padding: 4px 10px;
+  font-size: 11px;
+  overflow-y: auto;
+  z-index: 10;
+  color: #0a0;
+}
+</style>
+</head>
+<body>
+<div id="hud">
+  <span class="hud-item"><span class="hud-label">矿石: </span><span class="hud-value" id="hudMinerals">200</span></span>
+  <span class="hud-item"><span class="hud-label">人口: </span><span class="hud-value" id="hudPop">0/10</span></span>
+  <span class="hud-item"><span class="hud-label">单位: </span><span class="hud-value" id="hudUnits">0</span></span>
+  <span class="hud-item"><span class="hud-label">敌军: </span><span class="hud-value" id="hudEnemies">0</span></span>
+  <span class="hud-item"><span class="hud-label">时间: </span><span class="hud-value" id="hudTime">00:00</span></span>
+  <span class="hud-item" style="margin-left:auto;color:#0a0;font-size:12px;">左键选择/框选 | 右键指令 | 1-4快捷键</span>
+</div>
+<canvas id="gameCanvas"></canvas>
+<div id="sidebar">
+  <h3>📋 选中信息</h3>
+  <div id="info">未选中任何单位</div>
+  <h3 style="margin-top:10px;">🏗️ 操作面板</h3>
+  <div id="actions"></div>
+  <h3 style="margin-top:10px;">🗺️ 小地图</h3>
+  <canvas id="minimap" width="200" height="150"></canvas>
+</div>
+<div id="log"></div>
+
+<script>
+// ============================================================
+//  FuRTS - 文字版即时战略游戏 Demo
+//  技术方案A: 原生 HTML5 Canvas + Vanilla JS
+// ============================================================
+
+// ---- 常量 ----
+const CELL = 24;                // 网格单元大小(px)
+const MAP_W = 60;               // 地图宽(格)
+const MAP_H = 40;               // 地图高(格)
+const SIDEBAR_W = 220;
+const HUD_H = 36;
+const LOG_H = 80;
+const GATHER_AMOUNT = 5;        // 每次采矿量
+const GATHER_TIME = 90;         // 采矿帧数
+const BUILD_RANGE = 3;          // 建造范围
+
+// ---- Canvas初始化 ----
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const mmCanvas = document.getElementById('minimap');
+const mmCtx = mmCanvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth - SIDEBAR_W;
+  canvas.height = window.innerHeight - HUD_H;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ---- 相机 ----
+const camera = { x: 0, y: 0 };
+function clampCamera() {
+  const maxX = MAP_W * CELL - canvas.width;
+  const maxY = MAP_H * CELL - canvas.height + LOG_H;
+  camera.x = Math.max(0, Math.min(camera.x, maxX));
+  camera.y = Math.max(0, Math.min(camera.y, maxY));
+}
+
+// ---- 地图数据 ----
+// 0=空地, 1=矿石, 2=障碍(岩石)
+const mapData = [];
+for (let y = 0; y < MAP_H; y++) {
+  mapData[y] = [];
+  for (let x = 0; x < MAP_W; x++) {
+    mapData[y][x] = 0;
+  }
+}
+
+// 放置矿区(左上角区域)
+function placeMineral(cx, cy, count) {
+  for (let i = 0; i < count; i++) {
+    const dx = cx + Math.floor(Math.random() * 5) - 2;
+    const dy = cy + Math.floor(Math.random() * 4) - 2;
+    if (dx >= 0 && dx < MAP_W && dy >= 0 && dy < MAP_H) {
+      mapData[dy][dx] = 1;
+    }
+  }
+}
+placeMineral(5, 5, 12);
+placeMineral(50, 5, 10);
+placeMineral(5, 32, 10);
+placeMineral(50, 32, 10);
+placeMineral(28, 18, 8);
+
+// 放置一些障碍
+for (let i = 0; i < 30; i++) {
+  const rx = Math.floor(Math.random() * MAP_W);
+  const ry = Math.floor(Math.random() * MAP_H);
+  if (rx > 20 && rx < 40 && ry > 10 && ry < 30) {
+    mapData[ry][rx] = 2;
+  }
+}
+
+// ---- 实体系统 ----
+let nextId = 1;
+const entities = [];
+const TEAM_PLAYER = 0;
+const TEAM_ENEMY = 1;
+
+// 单位类型定义
+const UNIT_DEFS = {
+  worker:  { char: '工', hp: 50, speed: 1.5, atk: 5,  range: 1, cost: 50,  popCost: 1, buildTime: 150, color: '#0f0', desc: '农民 - 采矿/建造' },
+  soldier: { char: '兵', hp: 80, speed: 1.2, atk: 12, range: 1.5, cost: 75,  popCost: 1, buildTime: 200, color: '#ff0', desc: '步兵 - 近战' },
+  tank:    { char: '坦', hp: 200, speed: 0.8, atk: 30, range: 4, cost: 150, popCost: 2, buildTime: 400, color: '#f80', desc: '坦克 - 重火力' },
+  ranger:  { char: '弓', hp: 60, speed: 1.0, atk: 15, range: 5, cost: 100, popCost: 1, buildTime: 250, color: '#0ff', desc: '弓手 - 远程' },
+};
+
+// 建筑类型定义
+const BUILDING_DEFS = {
+  base:     { char: '基', w: 2, h: 2, hp: 1000, color: '#0f0', desc: '主基地 - 生产农民', produces: ['worker'], cost: 0 },
+  barracks: { char: '营', w: 2, h: 2, hp: 500,  color: '#ff0', desc: '兵营 - 生产步兵/弓手', produces: ['soldier', 'ranger'], cost: 150 },
+  factory:  { char: '厂', w: 2, h: 2, hp: 600,  color: '#f80', desc: '工厂 - 生产坦克', produces: ['tank'], cost: 200 },
+  tower:    { char: '塔', w: 1, h: 1, hp: 300,  color: '#f00', desc: '防御塔 - 自动攻击', cost: 100 },
+  supply:   { char: '房', w: 1, h: 1, hp: 200,  color: '#0ff', desc: '人口房 +10人口', cost: 50 },
+};
+
+function createUnit(type, gx, gy, team) {
+  const def = UNIT_DEFS[type];
+  const e = {
+    id: nextId++,
+    kind: 'unit',
+    type,
+    team,
+    gx, gy,
+    x: gx * CELL + CELL / 2,
+    y: gy * CELL + CELL / 2,
+    hp: def.hp,
+    maxHp: def.hp,
+    state: 'idle',       // idle, move, attack, gather, build
+    target: null,         // 移动目标 {x, y}
+    attackTarget: null,   // 攻击目标 entity id
+    gatherTarget: null,   // 采矿目标 {gx, gy}
+    carrying: 0,          // 携带矿石量
+    buildTarget: null,    // 正在建造的建筑
+    gatherTimer: 0,
+  };
+  entities.push(e);
+  return e;
+}
+
+function createBuilding(type, gx, gy, team) {
+  const def = BUILDING_DEFS[type];
+  const e = {
+    id: nextId++,
+    kind: 'building',
+    type,
+    team,
+    gx, gy,
+    x: gx * CELL + (def.w * CELL) / 2,
+    y: gy * CELL + (def.h * CELL) / 2,
+    hp: def.hp,
+    maxHp: def.hp,
+    buildProgress: type === 'base' ? def.hp : 0,   // 基地直接建好
+    queue: [],            // 生产队列
+    queueTimer: 0,
+    rallyPoint: null,
+  };
+  // 标记地图占用
+  for (let dy = 0; dy < def.h; dy++) {
+    for (let dx = 0; dx < def.w; dx++) {
+      if (gy + dy < MAP_H && gx + dx < MAP_W) {
+        mapData[gy + dy][gx + dx] = 3; // 建筑占用
+      }
+    }
+  }
+  entities.push(e);
+  return e;
+}
+
+// ---- 游戏状态 ----
+const game = {
+  minerals: 200,
+  pop: 0,
+  maxPop: 10,
+  frame: 0,
+  selected: [],       // 选中的实体ID数组
+  dragStart: null,     // 框选起点
+  dragEnd: null,
+  buildMode: null,     // 当前建造模式
+  buildPreview: null,  // 建造预览位置
+  paused: false,
+  gameOver: false,
+  scrollSpeed: 8,
+  keysDown: {},
+};
+
+// ---- 初始单位 ----
+// 玩家基地(右下)
+const playerBase = createBuilding('base', MAP_W - 6, MAP_H - 6, TEAM_PLAYER);
+createUnit('worker', MAP_W - 8, MAP_H - 5, TEAM_PLAYER);
+createUnit('worker', MAP_W - 8, MAP_H - 7, TEAM_PLAYER);
+createUnit('worker', MAP_W - 4, MAP_H - 7, TEAM_PLAYER);
+
+// 敌方基地(左上)
+const enemyBase = createBuilding('base', 3, 3, TEAM_ENEMY);
+createUnit('worker', 6, 4, TEAM_ENEMY);
+createUnit('worker', 6, 6, TEAM_ENEMY);
+createUnit('soldier', 8, 5, TEAM_ENEMY);
+
+// 移动相机到玩家基地
+camera.x = playerBase.x - canvas.width / 2;
+camera.y = playerBase.y - canvas.height / 2;
+clampCamera();
+
+// ---- 日志系统 ----
+const logEl = document.getElementById('log');
+const logMessages = [];
+function addLog(msg) {
+  const time = formatTime(game.frame);
+  logMessages.push(`[${time}] ${msg}`);
+  if (logMessages.length > 50) logMessages.shift();
+  logEl.innerHTML = logMessages.map(m => `<div>${m}</div>`).join('');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function formatTime(frame) {
+  const s = Math.floor(frame / 60);
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
+}
+
+addLog('⚔️ FuRTS 启动！选择单位后右键下达指令。');
+addLog('快捷键: 1=建农民 2=建兵营 3=建工厂 4=建人口房');
+
+// ---- 工具函数 ----
+function dist(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function gridDist(ax, ay, bx, by) {
+  return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
+}
+
+function entityAt(gx, gy) {
+  return entities.find(e => {
+    if (e.hp <= 0) return false;
+    if (e.kind === 'building') {
+      const def = BUILDING_DEFS[e.type];
+      return gx >= e.gx && gx < e.gx + def.w && gy >= e.gy && gy < e.gy + def.h;
+    }
+    return Math.floor(e.x / CELL) === gx && Math.floor(e.y / CELL) === gy;
+  });
+}
+
+function findNearestMineral(fromX, fromY) {
+  let best = null, bestDist = Infinity;
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      if (mapData[y][x] === 1) {
+        const d = gridDist(fromX, fromY, x, y);
+        if (d < bestDist) { bestDist = d; best = { gx: x, gy: y }; }
+      }
+    }
+  }
+  return best;
+}
+
+function findNearestBase(fromX, fromY, team) {
+  let best = null, bestDist = Infinity;
+  for (const e of entities) {
+    if (e.kind === 'building' && e.type === 'base' && e.team === team && e.hp > 0) {
+      const d = dist({ x: fromX * CELL, y: fromY * CELL }, e);
+      if (d < bestDist) { bestDist = d; best = e; }
+    }
+  }
+  return best;
+}
+
+function findNearestEnemy(entity, range) {
+  let best = null, bestDist = Infinity;
+  const rangePx = range * CELL;
+  for (const e of entities) {
+    if (e.hp <= 0 || e.team === entity.team) continue;
+    const d = dist(entity, e);
+    if (d < rangePx && d < bestDist) { bestDist = d; best = e; }
+  }
+  return best;
+}
+
+function getPlayerUnits() {
+  return entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit');
+}
+
+function getPlayerBuildings() {
+  return entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'building');
+}
+
+function countPop() {
+  let pop = 0;
+  for (const e of entities) {
+    if (e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit') {
+      pop += UNIT_DEFS[e.type].popCost;
+    }
+  }
+  let maxPop = 10; // 基地自带10
+  for (const e of entities) {
+    if (e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'building' && e.type === 'supply' && e.buildProgress >= e.maxHp) {
+      maxPop += 10;
+    }
+  }
+  game.pop = pop;
+  game.maxPop = maxPop;
+}
+
+// ---- 简易寻路 (直线 + 避障) ----
+function moveToward(entity, tx, ty, speed) {
+  const dx = tx - entity.x;
+  const dy = ty - entity.y;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  if (d < speed) {
+    entity.x = tx;
+    entity.y = ty;
+    return true;
+  }
+  let nx = entity.x + (dx / d) * speed;
+  let ny = entity.y + (dy / d) * speed;
+  // 简易碰撞检测
+  const ngx = Math.floor(nx / CELL);
+  const ngy = Math.floor(ny / CELL);
+  if (ngx >= 0 && ngx < MAP_W && ngy >= 0 && ngy < MAP_H) {
+    if (mapData[ngy][ngx] === 2) {
+      // 遇到障碍，尝试绕行
+      nx = entity.x + (dy / d) * speed;
+      ny = entity.y - (dx / d) * speed;
+    }
+  }
+  entity.x = Math.max(0, Math.min(nx, MAP_W * CELL));
+  entity.y = Math.max(0, Math.min(ny, MAP_H * CELL));
+  entity.gx = Math.floor(entity.x / CELL);
+  entity.gy = Math.floor(entity.y / CELL);
+  return false;
+}
+
+// ---- 更新逻辑 ----
+function update() {
+  if (game.paused || game.gameOver) return;
+  game.frame++;
+
+  // 键盘滚动
+  if (game.keysDown['ArrowLeft'] || game.keysDown['a']) camera.x -= game.scrollSpeed;
+  if (game.keysDown['ArrowRight'] || game.keysDown['d']) camera.x += game.scrollSpeed;
+  if (game.keysDown['ArrowUp'] || game.keysDown['w']) camera.y -= game.scrollSpeed;
+  if (game.keysDown['ArrowDown'] || game.keysDown['s']) camera.y += game.scrollSpeed;
+  clampCamera();
+
+  for (const e of entities) {
+    if (e.hp <= 0) continue;
+
+    // -- 建筑逻辑 --
+    if (e.kind === 'building') {
+      if (e.buildProgress < e.maxHp) continue; // 未完工
+      // 防御塔自动攻击
+      if (e.type === 'tower') {
+        const enemy = findNearestEnemy(e, 6);
+        if (enemy && game.frame % 30 === 0) {
+          enemy.hp -= 20;
+          if (enemy.hp <= 0) addLog(`防御塔消灭了 ${UNIT_DEFS[enemy.type]?.char || '敌人'}`);
+        }
+      }
+      // 生产队列
+      if (e.queue.length > 0) {
+        e.queueTimer++;
+        const producing = e.queue[0];
+        const def = UNIT_DEFS[producing];
+        if (e.queueTimer >= def.buildTime) {
+          // 生产完成
+          const spawnX = e.gx + (e.team === TEAM_PLAYER ? -2 : 3);
+          const spawnY = e.gy + 1;
+          createUnit(producing, spawnX, spawnY, e.team);
+          e.queue.shift();
+          e.queueTimer = 0;
+          if (e.team === TEAM_PLAYER) addLog(`生产完成: ${def.desc}`);
+        }
+      }
+      continue;
+    }
+
+    // -- 单位逻辑 --
+    const def = UNIT_DEFS[e.type];
+    const speed = def.speed;
+
+    // 自动反击
+    if (e.state === 'idle' || e.state === 'move') {
+      const nearby = findNearestEnemy(e, def.range + 2);
+      if (nearby && e.state === 'idle') {
+        e.attackTarget = nearby.id;
+        e.state = 'attack';
+      }
+    }
+
+    switch (e.state) {
+      case 'move': {
+        if (!e.target) { e.state = 'idle'; break; }
+        const arrived = moveToward(e, e.target.x, e.target.y, speed);
+        if (arrived) {
+          e.state = 'idle';
+          e.target = null;
+        }
+        break;
+      }
+      case 'attack': {
+        const target = entities.find(t => t.id === e.attackTarget);
+        if (!target || target.hp <= 0) {
+          e.state = 'idle';
+          e.attackTarget = null;
+          break;
+        }
+        const d = dist(e, target);
+        if (d > def.range * CELL) {
+          moveToward(e, target.x, target.y, speed);
+        } else {
+          // 攻击
+          if (game.frame % 20 === 0) {
+            target.hp -= def.atk;
+            if (target.hp <= 0) {
+              addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
+              e.state = 'idle';
+              e.attackTarget = null;
+              // 检查游戏结束
+              checkGameOver();
+            }
+          }
+        }
+        break;
+      }
+      case 'gather': {
+        if (e.carrying >= GATHER_AMOUNT) {
+          // 返回基地
+          const base = findNearestBase(e.gx, e.gy, e.team);
+          if (!base) { e.state = 'idle'; break; }
+          const d = dist(e, base);
+          if (d < CELL * 3) {
+            // 卸货
+            if (e.team === TEAM_PLAYER) game.minerals += e.carrying;
+            e.carrying = 0;
+            e.gatherTimer = 0;
+            // 继续采矿
+            const mineral = findNearestMineral(e.gx, e.gy);
+            if (mineral) e.gatherTarget = mineral;
+            else e.state = 'idle';
+          } else {
+            moveToward(e, base.x, base.y, speed);
+          }
+        } else if (e.gatherTarget) {
+          const tx = e.gatherTarget.gx * CELL + CELL / 2;
+          const ty = e.gatherTarget.gy * CELL + CELL / 2;
+          const d = Math.sqrt((e.x - tx) ** 2 + (e.y - ty) ** 2);
+          if (d < CELL) {
+            // 在矿点采矿
+            e.gatherTimer++;
+            if (e.gatherTimer >= GATHER_TIME) {
+              e.carrying = GATHER_AMOUNT;
+              // 矿消耗
+              if (mapData[e.gatherTarget.gy] && mapData[e.gatherTarget.gy][e.gatherTarget.gx] === 1) {
+                if (Math.random() < 0.15) {
+                  mapData[e.gatherTarget.gy][e.gatherTarget.gx] = 0;
+                }
+              }
+            }
+          } else {
+            moveToward(e, tx, ty, speed);
+          }
+        } else {
+          e.state = 'idle';
+        }
+        break;
+      }
+      case 'build': {
+        if (!e.buildTarget) { e.state = 'idle'; break; }
+        const building = entities.find(b => b.id === e.buildTarget);
+        if (!building || building.hp <= 0) { e.state = 'idle'; break; }
+        const d = dist(e, building);
+        if (d > CELL * 3) {
+          moveToward(e, building.x, building.y, speed);
+        } else {
+          building.buildProgress = Math.min(building.maxHp, building.buildProgress + 2);
+          if (building.buildProgress >= building.maxHp) {
+            addLog(`建筑完成: ${BUILDING_DEFS[building.type].desc}`);
+            e.state = 'idle';
+            e.buildTarget = null;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // 清除死亡实体
+  for (let i = entities.length - 1; i >= 0; i--) {
+    if (entities[i].hp <= 0) {
+      const dead = entities[i];
+      if (dead.kind === 'building') {
+        const bDef = BUILDING_DEFS[dead.type];
+        for (let dy = 0; dy < bDef.h; dy++) {
+          for (let dx = 0; dx < bDef.w; dx++) {
+            if (dead.gy + dy < MAP_H && dead.gx + dx < MAP_W) {
+              mapData[dead.gy + dy][dead.gx + dx] = 0;
+            }
+          }
+        }
+      }
+      entities.splice(i, 1);
+    }
+  }
+
+  // 更新人口
+  countPop();
+
+  // AI逻辑 (每120帧执行一次)
+  if (game.frame % 120 === 0) enemyAI();
+
+  // 更新HUD
+  updateHUD();
+}
+
+// ---- 敌方AI ----
+function enemyAI() {
+  const enemyUnits = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'unit');
+  const enemyBuildings = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'building');
+  const eBase = enemyBuildings.find(b => b.type === 'base');
+
+  if (!eBase) return;
+
+  // 敌方资源模拟(简化)
+  const enemyWorkers = enemyUnits.filter(u => u.type === 'worker');
+  const enemySoldiers = enemyUnits.filter(u => u.type !== 'worker');
+
+  // 工人去采矿
+  for (const w of enemyWorkers) {
+    if (w.state === 'idle') {
+      const mineral = findNearestMineral(w.gx, w.gy);
+      if (mineral) {
+        w.gatherTarget = mineral;
+        w.state = 'gather';
+      }
+    }
+  }
+
+  // 定期生产
+  if (eBase.queue.length === 0 && eBase.buildProgress >= eBase.maxHp) {
+    if (enemyWorkers.length < 3) {
+      eBase.queue.push('worker');
+    }
+  }
+
+  // 有兵营则生产战斗单位
+  const eBarracks = enemyBuildings.find(b => b.type === 'barracks' && b.buildProgress >= b.maxHp);
+  if (eBarracks && eBarracks.queue.length === 0) {
+    eBarracks.queue.push(Math.random() < 0.5 ? 'soldier' : 'ranger');
+  }
+
+  // 建造兵营
+  if (!enemyBuildings.find(b => b.type === 'barracks') && game.frame > 600) {
+    const bx = eBase.gx + 4;
+    const by = eBase.gy;
+    if (bx + 1 < MAP_W && by + 1 < MAP_H) {
+      const b = createBuilding('barracks', bx, by, TEAM_ENEMY);
+      b.buildProgress = b.maxHp; // AI建筑直接完成(简化)
+    }
+  }
+
+  // 进攻逻辑 - 士兵数量足够时发起攻击
+  if (enemySoldiers.length >= 3) {
+    const playerBuildings = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0);
+    if (playerBuildings.length > 0) {
+      const target = playerBuildings[0];
+      for (const s of enemySoldiers) {
+        if (s.state === 'idle') {
+          s.attackTarget = target.id;
+          s.state = 'attack';
+        }
+      }
+      if (game.frame % 600 === 0) addLog('⚠️ 敌军发起进攻！');
+    }
+  }
+}
+
+function checkGameOver() {
+  const playerBases = entities.filter(e => e.team === TEAM_PLAYER && e.kind === 'building' && e.type === 'base' && e.hp > 0);
+  const enemyBases = entities.filter(e => e.team === TEAM_ENEMY && e.kind === 'building' && e.type === 'base' && e.hp > 0);
+  if (playerBases.length === 0) {
+    game.gameOver = true;
+    addLog('💀 你的基地被摧毁了... 游戏结束！');
+  }
+  if (enemyBases.length === 0) {
+    game.gameOver = true;
+    addLog('🎉 恭喜！你消灭了敌方基地，胜利！');
+  }
+}
+
+// ---- 渲染 ----
+function render() {
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const startGX = Math.floor(camera.x / CELL);
+  const startGY = Math.floor(camera.y / CELL);
+  const endGX = Math.min(MAP_W, startGX + Math.ceil(canvas.width / CELL) + 1);
+  const endGY = Math.min(MAP_H, startGY + Math.ceil(canvas.height / CELL) + 1);
+
+  // 绘制网格和地形
+  for (let gy = startGY; gy < endGY; gy++) {
+    for (let gx = startGX; gx < endGX; gx++) {
+      const sx = gx * CELL - camera.x;
+      const sy = gy * CELL - camera.y;
+
+      // 网格线
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.strokeRect(sx, sy, CELL, CELL);
+
+      const tile = mapData[gy]?.[gx];
+      if (tile === 1) {
+        // 矿石
+        ctx.fillStyle = '#44f';
+        ctx.font = `${CELL - 4}px Courier New`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('矿', sx + CELL / 2, sy + CELL / 2);
+      } else if (tile === 2) {
+        // 岩石
+        ctx.fillStyle = '#555';
+        ctx.font = `${CELL - 4}px Courier New`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('岩', sx + CELL / 2, sy + CELL / 2);
+      }
+    }
+  }
+
+  // 绘制实体
+  for (const e of entities) {
+    if (e.hp <= 0) continue;
+    const sx = e.x - camera.x;
+    const sy = e.y - camera.y;
+
+    // 视口裁剪
+    if (sx < -CELL * 3 || sx > canvas.width + CELL * 3 || sy < -CELL * 3 || sy > canvas.height + CELL * 3) continue;
+
+    if (e.kind === 'building') {
+      const bDef = BUILDING_DEFS[e.type];
+      const bx = e.gx * CELL - camera.x;
+      const by = e.gy * CELL - camera.y;
+      const bw = bDef.w * CELL;
+      const bh = bDef.h * CELL;
+
+      // 建筑底色
+      const alpha = e.buildProgress >= e.maxHp ? 0.3 : 0.15;
+      ctx.fillStyle = e.team === TEAM_PLAYER ? `rgba(0,255,0,${alpha})` : `rgba(255,0,0,${alpha})`;
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = e.team === TEAM_PLAYER ? '#0a0' : '#a00';
+      ctx.strokeRect(bx, by, bw, bh);
+
+      // 建筑文字
+      const bColor = e.team === TEAM_PLAYER ? bDef.color : '#f44';
+      ctx.fillStyle = bColor;
+      ctx.font = `bold ${CELL}px Courier New`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = e.buildProgress < e.maxHp
+        ? `${bDef.char}${Math.floor(e.buildProgress / e.maxHp * 100)}%`
+        : bDef.char;
+      ctx.fillText(label, bx + bw / 2, by + bh / 2);
+
+      // 生产进度
+      if (e.queue.length > 0) {
+        const producing = e.queue[0];
+        const uDef = UNIT_DEFS[producing];
+        const pct = e.queueTimer / uDef.buildTime;
+        ctx.fillStyle = '#030';
+        ctx.fillRect(bx, by + bh + 2, bw, 4);
+        ctx.fillStyle = '#0f0';
+        ctx.fillRect(bx, by + bh + 2, bw * pct, 4);
+      }
+
+      // 血条
+      drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, e.team);
+    } else {
+      // 单位
+      const uDef = UNIT_DEFS[e.type];
+      const uColor = e.team === TEAM_PLAYER ? uDef.color : '#f44';
+
+      // 选中高亮
+      if (game.selected.includes(e.id)) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, CELL / 2 + 2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+
+      // 单位文字
+      ctx.fillStyle = uColor;
+      ctx.font = `bold ${CELL - 2}px Courier New`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(uDef.char, sx, sy);
+
+      // 携带矿石指示
+      if (e.carrying > 0) {
+        ctx.fillStyle = '#44f';
+        ctx.font = '10px Courier New';
+        ctx.fillText('◆', sx + 10, sy - 10);
+      }
+
+      // 状态指示
+      if (e.state === 'gather') {
+        ctx.fillStyle = '#0af';
+        ctx.font = '9px Courier New';
+        ctx.fillText('⛏', sx + 10, sy + 10);
+      } else if (e.state === 'attack') {
+        ctx.fillStyle = '#f00';
+        ctx.font = '9px Courier New';
+        ctx.fillText('⚔', sx + 10, sy + 10);
+      } else if (e.state === 'build') {
+        ctx.fillStyle = '#ff0';
+        ctx.font = '9px Courier New';
+        ctx.fillText('🔨', sx + 10, sy + 10);
+      }
+
+      // 血条
+      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, e.team);
+    }
+  }
+
+  // 框选框
+  if (game.dragStart && game.dragEnd) {
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    const rx = Math.min(game.dragStart.x, game.dragEnd.x);
+    const ry = Math.min(game.dragStart.y, game.dragEnd.y);
+    const rw = Math.abs(game.dragEnd.x - game.dragStart.x);
+    const rh = Math.abs(game.dragEnd.y - game.dragStart.y);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
+  }
+
+  // 建造预览
+  if (game.buildMode && game.buildPreview) {
+    const bDef = BUILDING_DEFS[game.buildMode];
+    const bx = game.buildPreview.gx * CELL - camera.x;
+    const by = game.buildPreview.gy * CELL - camera.y;
+    const bw = bDef.w * CELL;
+    const bh = bDef.h * CELL;
+    const canBuild = canPlaceBuilding(game.buildMode, game.buildPreview.gx, game.buildPreview.gy);
+    ctx.fillStyle = canBuild ? 'rgba(0,255,0,0.2)' : 'rgba(255,0,0,0.2)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = canBuild ? '#0f0' : '#f00';
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.setLineDash([]);
+    ctx.fillStyle = canBuild ? '#0f0' : '#f00';
+    ctx.font = `bold ${CELL}px Courier New`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(bDef.char, bx + bw / 2, by + bh / 2);
+  }
+
+  // 游戏结束覆盖层
+  if (game.gameOver) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold 48px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const msg = entities.filter(e => e.team === TEAM_PLAYER && e.kind === 'building' && e.type === 'base' && e.hp > 0).length === 0
+      ? '游戏失败' : '胜利！';
+    ctx.fillText(msg, canvas.width / 2, canvas.height / 2 - 20);
+    ctx.font = '20px Courier New';
+    ctx.fillText('按 R 重新开始', canvas.width / 2, canvas.height / 2 + 30);
+  }
+
+  // 小地图
+  renderMinimap();
+}
+
+function drawHpBar(x, y, w, hp, maxHp, team) {
+  if (hp >= maxHp) return;
+  const pct = hp / maxHp;
+  ctx.fillStyle = '#300';
+  ctx.fillRect(x, y, w, 3);
+  ctx.fillStyle = pct > 0.5 ? '#0f0' : pct > 0.25 ? '#ff0' : '#f00';
+  ctx.fillRect(x, y, w * pct, 3);
+}
+
+function renderMinimap() {
+  const mw = mmCanvas.width;
+  const mh = mmCanvas.height;
+  const sx = mw / MAP_W;
+  const sy = mh / MAP_H;
+
+  mmCtx.fillStyle = '#000';
+  mmCtx.fillRect(0, 0, mw, mh);
+
+  // 地形
+  for (let gy = 0; gy < MAP_H; gy++) {
+    for (let gx = 0; gx < MAP_W; gx++) {
+      if (mapData[gy][gx] === 1) {
+        mmCtx.fillStyle = '#00a';
+        mmCtx.fillRect(gx * sx, gy * sy, sx, sy);
+      } else if (mapData[gy][gx] === 2) {
+        mmCtx.fillStyle = '#333';
+        mmCtx.fillRect(gx * sx, gy * sy, sx, sy);
+      }
+    }
+  }
+
+  // 实体
+  for (const e of entities) {
+    if (e.hp <= 0) continue;
+    const ex = (e.x / CELL) * sx;
+    const ey = (e.y / CELL) * sy;
+    if (e.team === TEAM_PLAYER) {
+      mmCtx.fillStyle = e.kind === 'building' ? '#0f0' : '#0a0';
+    } else {
+      mmCtx.fillStyle = e.kind === 'building' ? '#f00' : '#a00';
+    }
+    const size = e.kind === 'building' ? 4 : 2;
+    mmCtx.fillRect(ex - size / 2, ey - size / 2, size, size);
+  }
+
+  // 视口框
+  const vx = (camera.x / (MAP_W * CELL)) * mw;
+  const vy = (camera.y / (MAP_H * CELL)) * mh;
+  const vw = (canvas.width / (MAP_W * CELL)) * mw;
+  const vh = ((canvas.height - LOG_H) / (MAP_H * CELL)) * mh;
+  mmCtx.strokeStyle = '#fff';
+  mmCtx.lineWidth = 1;
+  mmCtx.strokeRect(vx, vy, vw, vh);
+}
+
+// ---- 建筑放置检测 ----
+function canPlaceBuilding(type, gx, gy) {
+  const def = BUILDING_DEFS[type];
+  for (let dy = 0; dy < def.h; dy++) {
+    for (let dx = 0; dx < def.w; dx++) {
+      const tx = gx + dx;
+      const ty = gy + dy;
+      if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return false;
+      if (mapData[ty][tx] !== 0) return false;
+    }
+  }
+  return true;
+}
+
+// ---- UI更新 ----
+function updateHUD() {
+  document.getElementById('hudMinerals').textContent = game.minerals;
+  document.getElementById('hudPop').textContent = `${game.pop}/${game.maxPop}`;
+  document.getElementById('hudUnits').textContent = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit').length;
+  document.getElementById('hudEnemies').textContent = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0).length;
+  document.getElementById('hudTime').textContent = formatTime(game.frame);
+}
+
+function updateSidebar() {
+  const infoEl = document.getElementById('info');
+  const actionsEl = document.getElementById('actions');
+
+  if (game.buildMode) {
+    const bDef = BUILDING_DEFS[game.buildMode];
+    infoEl.innerHTML = `<span style="color:#ff0">建造模式: ${bDef.desc}</span><br>左键放置 | 右键/Esc取消`;
+    actionsEl.innerHTML = `<button class="btn" onclick="cancelBuild()">取消建造 [Esc]</button>`;
+    return;
+  }
+
+  if (game.selected.length === 0) {
+    infoEl.innerHTML = '未选中任何单位';
+    actionsEl.innerHTML = '';
+    return;
+  }
+
+  const selectedEntities = game.selected.map(id => entities.find(e => e.id === id)).filter(Boolean);
+  if (selectedEntities.length === 0) {
+    game.selected = [];
+    infoEl.innerHTML = '未选中任何单位';
+    actionsEl.innerHTML = '';
+    return;
+  }
+
+  const first = selectedEntities[0];
+
+  if (first.kind === 'building') {
+    const bDef = BUILDING_DEFS[first.type];
+    let html = `<span style="color:${bDef.color}">${bDef.char} ${bDef.desc}</span><br>`;
+    html += `HP: ${first.hp}/${first.maxHp}<br>`;
+    if (first.buildProgress < first.maxHp) {
+      html += `建造中: ${Math.floor(first.buildProgress / first.maxHp * 100)}%`;
+    }
+    if (first.queue.length > 0) {
+      html += `<br>生产中: ${UNIT_DEFS[first.queue[0]].char} (${first.queue.length}个排队)`;
+    }
+    infoEl.innerHTML = html;
+
+    // 生产按钮
+    let btns = '';
+    if (first.buildProgress >= first.maxHp && first.team === TEAM_PLAYER && bDef.produces) {
+      for (const uType of bDef.produces) {
+        const uDef = UNIT_DEFS[uType];
+        btns += `<button class="btn" onclick="trainUnit('${uType}', ${first.id})">
+          ${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
+        </button>`;
+      }
+    }
+    actionsEl.innerHTML = btns;
+  } else {
+    // 单位信息
+    if (selectedEntities.length === 1) {
+      const uDef = UNIT_DEFS[first.type];
+      let html = `<span style="color:${uDef.color}">${uDef.char} ${uDef.desc}</span><br>`;
+      html += `HP: ${first.hp}/${first.maxHp}<br>`;
+      html += `攻击: ${uDef.atk} | 射程: ${uDef.range}<br>`;
+      html += `状态: ${first.state}`;
+      if (first.carrying > 0) html += `<br>携带矿石: ${first.carrying}`;
+      infoEl.innerHTML = html;
+    } else {
+      const counts = {};
+      for (const e of selectedEntities) {
+        counts[e.type] = (counts[e.type] || 0) + 1;
+      }
+      let html = `选中 ${selectedEntities.length} 个单位:<br>`;
+      for (const [type, count] of Object.entries(counts)) {
+        html += `${UNIT_DEFS[type].char} x${count} `;
+      }
+      infoEl.innerHTML = html;
+    }
+
+    // 工人建造按钮
+    let btns = '';
+    const hasWorker = selectedEntities.some(e => e.type === 'worker');
+    if (hasWorker) {
+      for (const [bType, bDef] of Object.entries(BUILDING_DEFS)) {
+        if (bType === 'base') continue;
+        btns += `<button class="btn" onclick="startBuild('${bType}')" ${game.minerals < bDef.cost ? 'disabled' : ''}>
+          ${bDef.char} ${bDef.desc} <span class="cost">${bDef.cost}矿</span>
+        </button>`;
+      }
+    }
+    actionsEl.innerHTML = btns;
+  }
+}
+
+// ---- 操作命令 ----
+function trainUnit(type, buildingId) {
+  const building = entities.find(e => e.id === buildingId);
+  if (!building) return;
+  const uDef = UNIT_DEFS[type];
+  if (game.minerals < uDef.cost) { addLog('矿石不足！'); return; }
+  if (game.pop + uDef.popCost > game.maxPop) { addLog('人口上限！需要建造人口房。'); return; }
+  game.minerals -= uDef.cost;
+  building.queue.push(type);
+  addLog(`开始生产: ${uDef.desc}`);
+  updateSidebar();
+}
+
+function startBuild(type) {
+  const bDef = BUILDING_DEFS[type];
+  if (game.minerals < bDef.cost) { addLog('矿石不足！'); return; }
+  game.buildMode = type;
+  addLog(`进入建造模式: ${bDef.desc} - 左键放置`);
+  updateSidebar();
+}
+
+function cancelBuild() {
+  game.buildMode = null;
+  game.buildPreview = null;
+  updateSidebar();
+}
+
+function placeBuildingAtMouse(gx, gy) {
+  if (!game.buildMode) return;
+  if (!canPlaceBuilding(game.buildMode, gx, gy)) {
+    addLog('无法在此处建造！');
+    return;
+  }
+  const bDef = BUILDING_DEFS[game.buildMode];
+  if (game.minerals < bDef.cost) { addLog('矿石不足！'); return; }
+  game.minerals -= bDef.cost;
+  const building = createBuilding(game.buildMode, gx, gy, TEAM_PLAYER);
+
+  // 派遣选中的工人去建造
+  const workers = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.type === 'worker' && e.team === TEAM_PLAYER);
+  if (workers.length > 0) {
+    workers[0].state = 'build';
+    workers[0].buildTarget = building.id;
+  }
+
+  addLog(`开始建造: ${bDef.desc}`);
+  game.buildMode = null;
+  game.buildPreview = null;
+  updateSidebar();
+}
+
+// ---- 输入处理 ----
+canvas.addEventListener('mousedown', (e) => {
+  const mx = e.offsetX;
+  const my = e.offsetY;
+
+  if (e.button === 0) {
+    // 左键 - 建造模式
+    if (game.buildMode) {
+      const gx = Math.floor((mx + camera.x) / CELL);
+      const gy = Math.floor((my + camera.y) / CELL);
+      placeBuildingAtMouse(gx, gy);
+      return;
+    }
+    // 左键 - 开始选择/框选
+    game.dragStart = { x: mx, y: my };
+    game.dragEnd = null;
+  }
+  if (e.button === 2) {
+    e.preventDefault();
+    // 右键 - 取消建造模式
+    if (game.buildMode) {
+      cancelBuild();
+      return;
+    }
+    // 右键 - 下达指令
+    issueCommand(mx, my);
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const mx = e.offsetX;
+  const my = e.offsetY;
+
+  // 建造预览
+  if (game.buildMode) {
+    game.buildPreview = {
+      gx: Math.floor((mx + camera.x) / CELL),
+      gy: Math.floor((my + camera.y) / CELL),
+    };
+  }
+
+  // 框选拖拽
+  if (game.dragStart) {
+    game.dragEnd = { x: mx, y: my };
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (e.button === 0 && game.dragStart) {
+    const mx = e.offsetX;
+    const my = e.offsetY;
+    const dx = Math.abs(mx - game.dragStart.x);
+    const dy = Math.abs(my - game.dragStart.y);
+
+    if (dx < 5 && dy < 5) {
+      // 点击选择
+      const gx = Math.floor((mx + camera.x) / CELL);
+      const gy = Math.floor((my + camera.y) / CELL);
+      selectAt(gx, gy, e.shiftKey);
+    } else {
+      // 框选
+      boxSelect(game.dragStart, { x: mx, y: my }, e.shiftKey);
+    }
+    game.dragStart = null;
+    game.dragEnd = null;
+    updateSidebar();
+  }
+});
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function selectAt(gx, gy, additive) {
+  const target = entityAt(gx, gy);
+  if (!additive) game.selected = [];
+  if (target && target.team === TEAM_PLAYER) {
+    if (!game.selected.includes(target.id)) {
+      game.selected.push(target.id);
+    }
+  }
+}
+
+function boxSelect(start, end, additive) {
+  const x1 = Math.min(start.x, end.x) + camera.x;
+  const y1 = Math.min(start.y, end.y) + camera.y;
+  const x2 = Math.max(start.x, end.x) + camera.x;
+  const y2 = Math.max(start.y, end.y) + camera.y;
+
+  if (!additive) game.selected = [];
+
+  for (const e of entities) {
+    if (e.hp <= 0 || e.team !== TEAM_PLAYER || e.kind !== 'unit') continue;
+    if (e.x >= x1 && e.x <= x2 && e.y >= y1 && e.y <= y2) {
+      if (!game.selected.includes(e.id)) game.selected.push(e.id);
+    }
+  }
+}
+
+function issueCommand(mx, my) {
+  if (game.selected.length === 0) return;
+
+  const gx = Math.floor((mx + camera.x) / CELL);
+  const gy = Math.floor((my + camera.y) / CELL);
+
+  const selectedUnits = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.kind === 'unit' && e.team === TEAM_PLAYER);
+
+  if (selectedUnits.length === 0) return;
+
+  // 检查右键目标
+  const target = entityAt(gx, gy);
+
+  // 点击敌方 → 攻击
+  if (target && target.team === TEAM_ENEMY) {
+    for (const u of selectedUnits) {
+      u.state = 'attack';
+      u.attackTarget = target.id;
+    }
+    addLog(`⚔️ 命令攻击!`);
+    return;
+  }
+
+  // 工人点击矿石 → 采矿
+  if (mapData[gy]?.[gx] === 1) {
+    for (const u of selectedUnits) {
+      if (u.type === 'worker') {
+        u.state = 'gather';
+        u.gatherTarget = { gx, gy };
+        u.gatherTimer = 0;
+      }
+    }
+    addLog('⛏️ 前往采矿');
+    return;
+  }
+
+  // 工人点击未完工建筑 → 建造
+  if (target && target.kind === 'building' && target.team === TEAM_PLAYER && target.buildProgress < target.maxHp) {
+    for (const u of selectedUnits) {
+      if (u.type === 'worker') {
+        u.state = 'build';
+        u.buildTarget = target.id;
+      }
+    }
+    addLog('🔨 前往建造');
+    return;
+  }
+
+  // 移动
+  const count = selectedUnits.length;
+  const cols = Math.ceil(Math.sqrt(count));
+  selectedUnits.forEach((u, i) => {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    u.state = 'move';
+    u.target = {
+      x: gx * CELL + CELL / 2 + col * CELL,
+      y: gy * CELL + CELL / 2 + row * CELL,
+    };
+    u.attackTarget = null;
+    u.gatherTarget = null;
+  });
+}
+
+// 小地图点击
+mmCanvas.addEventListener('click', (e) => {
+  const rect = mmCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  camera.x = (mx / mmCanvas.width) * MAP_W * CELL - canvas.width / 2;
+  camera.y = (my / mmCanvas.height) * MAP_H * CELL - canvas.height / 2;
+  clampCamera();
+});
+
+// 键盘
+window.addEventListener('keydown', (e) => {
+  game.keysDown[e.key] = true;
+
+  if (e.key === 'Escape') cancelBuild();
+
+  // 快捷键
+  const sel = game.selected.map(id => entities.find(en => en.id === id)).filter(Boolean);
+  const selBuilding = sel.find(s => s.kind === 'building' && s.team === TEAM_PLAYER);
+  const hasWorker = sel.some(s => s.type === 'worker' && s.team === TEAM_PLAYER);
+
+  if (e.key === '1') {
+    if (selBuilding && selBuilding.type === 'base') trainUnit('worker', selBuilding.id);
+    else if (selBuilding && selBuilding.type === 'barracks') trainUnit('soldier', selBuilding.id);
+  }
+  if (e.key === '2') {
+    if (hasWorker) startBuild('barracks');
+    else if (selBuilding && selBuilding.type === 'barracks') trainUnit('ranger', selBuilding.id);
+  }
+  if (e.key === '3') {
+    if (hasWorker) startBuild('factory');
+    else if (selBuilding && selBuilding.type === 'factory') trainUnit('tank', selBuilding.id);
+  }
+  if (e.key === '4') {
+    if (hasWorker) startBuild('supply');
+  }
+
+  if (e.key === 'r' && game.gameOver) location.reload();
+});
+
+window.addEventListener('keyup', (e) => {
+  game.keysDown[e.key] = false;
+});
+
+// ---- 主循环 ----
+function gameLoop() {
+  update();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
