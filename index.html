@@ -138,22 +138,21 @@ body {
 </div>
 <div id="log"></div>
 
+<script src="map.js"></script>
+<script src="entities.js"></script>
 <script>
 // ============================================================
-//  FuRTS - 文字版即时战略游戏 Demo
-//  技术方案A: 原生 HTML5 Canvas + Vanilla JS
+//  FuRTS - 系统界面 / 渲染 / 输入 / 游戏循环
+//  依赖: map.js, entities.js
 // ============================================================
 
-// ---- 常量 ----
-const CELL = 24;                // 网格单元大小(px)
-const MAP_W = 60;               // 地图宽(格)
-const MAP_H = 40;               // 地图高(格)
+// ---- 界面常量 ----
 const SIDEBAR_W = 220;
 const HUD_H = 36;
 const LOG_H = 80;
-const GATHER_AMOUNT = 5;        // 每次采矿量
-const GATHER_TIME = 90;         // 采矿帧数
-const BUILD_RANGE = 3;          // 建造范围
+const GATHER_AMOUNT = 5;
+const GATHER_TIME = 90;
+const BUILD_RANGE = 3;
 
 // ---- Canvas初始化 ----
 const canvas = document.getElementById('gameCanvas');
@@ -177,128 +176,17 @@ function clampCamera() {
   camera.y = Math.max(0, Math.min(camera.y, maxY));
 }
 
-// ---- 地图数据 ----
-// 0=空地, 1=矿石, 2=障碍(岩石)
-const mapData = [];
-for (let y = 0; y < MAP_H; y++) {
-  mapData[y] = [];
-  for (let x = 0; x < MAP_W; x++) {
-    mapData[y][x] = 0;
-  }
-}
-
-// 放置矿区(左上角区域)
-function placeMineral(cx, cy, count) {
-  for (let i = 0; i < count; i++) {
-    const dx = cx + Math.floor(Math.random() * 5) - 2;
-    const dy = cy + Math.floor(Math.random() * 4) - 2;
-    if (dx >= 0 && dx < MAP_W && dy >= 0 && dy < MAP_H) {
-      mapData[dy][dx] = 1;
-    }
-  }
-}
-placeMineral(5, 5, 12);
-placeMineral(50, 5, 10);
-placeMineral(5, 32, 10);
-placeMineral(50, 32, 10);
-placeMineral(28, 18, 8);
-
-// 放置一些障碍
-for (let i = 0; i < 30; i++) {
-  const rx = Math.floor(Math.random() * MAP_W);
-  const ry = Math.floor(Math.random() * MAP_H);
-  if (rx > 20 && rx < 40 && ry > 10 && ry < 30) {
-    mapData[ry][rx] = 2;
-  }
-}
-
-// ---- 实体系统 ----
-let nextId = 1;
-const entities = [];
-const TEAM_PLAYER = 0;
-const TEAM_ENEMY = 1;
-
-// 单位类型定义
-const UNIT_DEFS = {
-  worker:  { char: '工', hp: 50, speed: 1.5, atk: 5,  range: 1, cost: 50,  popCost: 1, buildTime: 150, color: '#0f0', desc: '农民 - 采矿/建造' },
-  soldier: { char: '兵', hp: 80, speed: 1.2, atk: 12, range: 1.5, cost: 75,  popCost: 1, buildTime: 200, color: '#ff0', desc: '步兵 - 近战' },
-  tank:    { char: '坦', hp: 200, speed: 0.8, atk: 30, range: 4, cost: 150, popCost: 2, buildTime: 400, color: '#f80', desc: '坦克 - 重火力' },
-  ranger:  { char: '弓', hp: 60, speed: 1.0, atk: 15, range: 5, cost: 100, popCost: 1, buildTime: 250, color: '#0ff', desc: '弓手 - 远程' },
-};
-
-// 建筑类型定义
-const BUILDING_DEFS = {
-  base:     { char: '基', w: 2, h: 2, hp: 1000, color: '#0f0', desc: '主基地 - 生产农民', produces: ['worker'], cost: 0 },
-  barracks: { char: '营', w: 2, h: 2, hp: 500,  color: '#ff0', desc: '兵营 - 生产步兵/弓手', produces: ['soldier', 'ranger'], cost: 150 },
-  factory:  { char: '厂', w: 2, h: 2, hp: 600,  color: '#f80', desc: '工厂 - 生产坦克', produces: ['tank'], cost: 200 },
-  tower:    { char: '塔', w: 1, h: 1, hp: 300,  color: '#f00', desc: '防御塔 - 自动攻击', cost: 100 },
-  supply:   { char: '房', w: 1, h: 1, hp: 200,  color: '#0ff', desc: '人口房 +10人口', cost: 50 },
-};
-
-function createUnit(type, gx, gy, team) {
-  const def = UNIT_DEFS[type];
-  const e = {
-    id: nextId++,
-    kind: 'unit',
-    type,
-    team,
-    gx, gy,
-    x: gx * CELL + CELL / 2,
-    y: gy * CELL + CELL / 2,
-    hp: def.hp,
-    maxHp: def.hp,
-    state: 'idle',       // idle, move, attack, gather, build
-    target: null,         // 移动目标 {x, y}
-    attackTarget: null,   // 攻击目标 entity id
-    gatherTarget: null,   // 采矿目标 {gx, gy}
-    carrying: 0,          // 携带矿石量
-    buildTarget: null,    // 正在建造的建筑
-    gatherTimer: 0,
-  };
-  entities.push(e);
-  return e;
-}
-
-function createBuilding(type, gx, gy, team) {
-  const def = BUILDING_DEFS[type];
-  const e = {
-    id: nextId++,
-    kind: 'building',
-    type,
-    team,
-    gx, gy,
-    x: gx * CELL + (def.w * CELL) / 2,
-    y: gy * CELL + (def.h * CELL) / 2,
-    hp: def.hp,
-    maxHp: def.hp,
-    buildProgress: type === 'base' ? def.hp : 0,   // 基地直接建好
-    queue: [],            // 生产队列
-    queueTimer: 0,
-    rallyPoint: null,
-  };
-  // 标记地图占用
-  for (let dy = 0; dy < def.h; dy++) {
-    for (let dx = 0; dx < def.w; dx++) {
-      if (gy + dy < MAP_H && gx + dx < MAP_W) {
-        mapData[gy + dy][gx + dx] = 3; // 建筑占用
-      }
-    }
-  }
-  entities.push(e);
-  return e;
-}
-
 // ---- 游戏状态 ----
 const game = {
   minerals: 200,
   pop: 0,
   maxPop: 10,
   frame: 0,
-  selected: [],       // 选中的实体ID数组
-  dragStart: null,     // 框选起点
+  selected: [],
+  dragStart: null,
   dragEnd: null,
-  buildMode: null,     // 当前建造模式
-  buildPreview: null,  // 建造预览位置
+  buildMode: null,
+  buildPreview: null,
   paused: false,
   gameOver: false,
   scrollSpeed: 8,
@@ -306,13 +194,11 @@ const game = {
 };
 
 // ---- 初始单位 ----
-// 玩家基地(右下)
 const playerBase = createBuilding('base', MAP_W - 6, MAP_H - 6, TEAM_PLAYER);
 createUnit('worker', MAP_W - 8, MAP_H - 5, TEAM_PLAYER);
 createUnit('worker', MAP_W - 8, MAP_H - 7, TEAM_PLAYER);
 createUnit('worker', MAP_W - 4, MAP_H - 7, TEAM_PLAYER);
 
-// 敌方基地(左上)
 const enemyBase = createBuilding('base', 3, 3, TEAM_ENEMY);
 createUnit('worker', 6, 4, TEAM_ENEMY);
 createUnit('worker', 6, 6, TEAM_ENEMY);
@@ -341,69 +227,7 @@ function formatTime(frame) {
 
 addLog('⚔️ FuRTS 启动！操作指南见右侧边栏。');
 
-// ---- 工具函数 ----
-function dist(a, b) {
-  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
-}
-
-function gridDist(ax, ay, bx, by) {
-  return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
-}
-
-function entityAt(gx, gy) {
-  return entities.find(e => {
-    if (e.hp <= 0) return false;
-    if (e.kind === 'building') {
-      const def = BUILDING_DEFS[e.type];
-      return gx >= e.gx && gx < e.gx + def.w && gy >= e.gy && gy < e.gy + def.h;
-    }
-    return Math.floor(e.x / CELL) === gx && Math.floor(e.y / CELL) === gy;
-  });
-}
-
-function findNearestMineral(fromX, fromY) {
-  let best = null, bestDist = Infinity;
-  for (let y = 0; y < MAP_H; y++) {
-    for (let x = 0; x < MAP_W; x++) {
-      if (mapData[y][x] === 1) {
-        const d = gridDist(fromX, fromY, x, y);
-        if (d < bestDist) { bestDist = d; best = { gx: x, gy: y }; }
-      }
-    }
-  }
-  return best;
-}
-
-function findNearestBase(fromX, fromY, team) {
-  let best = null, bestDist = Infinity;
-  for (const e of entities) {
-    if (e.kind === 'building' && e.type === 'base' && e.team === team && e.hp > 0) {
-      const d = dist({ x: fromX * CELL, y: fromY * CELL }, e);
-      if (d < bestDist) { bestDist = d; best = e; }
-    }
-  }
-  return best;
-}
-
-function findNearestEnemy(entity, range) {
-  let best = null, bestDist = Infinity;
-  const rangePx = range * CELL;
-  for (const e of entities) {
-    if (e.hp <= 0 || e.team === entity.team) continue;
-    const d = dist(entity, e);
-    if (d < rangePx && d < bestDist) { bestDist = d; best = e; }
-  }
-  return best;
-}
-
-function getPlayerUnits() {
-  return entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit');
-}
-
-function getPlayerBuildings() {
-  return entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'building');
-}
-
+// ---- 人口计算 ----
 function countPop() {
   let pop = 0;
   for (const e of entities) {
@@ -411,7 +235,7 @@ function countPop() {
       pop += UNIT_DEFS[e.type].popCost;
     }
   }
-  let maxPop = 10; // 基地自带10
+  let maxPop = 10;
   for (const e of entities) {
     if (e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'building' && e.type === 'supply' && e.buildProgress >= e.maxHp) {
       maxPop += 10;
@@ -419,35 +243,6 @@ function countPop() {
   }
   game.pop = pop;
   game.maxPop = maxPop;
-}
-
-// ---- 简易寻路 (直线 + 避障) ----
-function moveToward(entity, tx, ty, speed) {
-  const dx = tx - entity.x;
-  const dy = ty - entity.y;
-  const d = Math.sqrt(dx * dx + dy * dy);
-  if (d < speed) {
-    entity.x = tx;
-    entity.y = ty;
-    return true;
-  }
-  let nx = entity.x + (dx / d) * speed;
-  let ny = entity.y + (dy / d) * speed;
-  // 简易碰撞检测
-  const ngx = Math.floor(nx / CELL);
-  const ngy = Math.floor(ny / CELL);
-  if (ngx >= 0 && ngx < MAP_W && ngy >= 0 && ngy < MAP_H) {
-    if (mapData[ngy][ngx] === 2) {
-      // 遇到障碍，尝试绕行
-      nx = entity.x + (dy / d) * speed;
-      ny = entity.y - (dx / d) * speed;
-    }
-  }
-  entity.x = Math.max(0, Math.min(nx, MAP_W * CELL));
-  entity.y = Math.max(0, Math.min(ny, MAP_H * CELL));
-  entity.gx = Math.floor(entity.x / CELL);
-  entity.gy = Math.floor(entity.y / CELL);
-  return false;
 }
 
 // ---- 更新逻辑 ----
@@ -467,7 +262,7 @@ function update() {
 
     // -- 建筑逻辑 --
     if (e.kind === 'building') {
-      if (e.buildProgress < e.maxHp) continue; // 未完工
+      if (e.buildProgress < e.maxHp) continue;
       // 防御塔自动攻击
       if (e.type === 'tower') {
         const enemy = findNearestEnemy(e, 6);
@@ -482,7 +277,6 @@ function update() {
         const producing = e.queue[0];
         const def = UNIT_DEFS[producing];
         if (e.queueTimer >= def.buildTime) {
-          // 生产完成
           const spawnX = e.gx + (e.team === TEAM_PLAYER ? -2 : 3);
           const spawnY = e.gy + 1;
           createUnit(producing, spawnX, spawnY, e.team);
@@ -528,14 +322,12 @@ function update() {
         if (d > def.range * CELL) {
           moveToward(e, target.x, target.y, speed);
         } else {
-          // 攻击
           if (game.frame % 20 === 0) {
             target.hp -= def.atk;
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.state = 'idle';
               e.attackTarget = null;
-              // 检查游戏结束
               checkGameOver();
             }
           }
@@ -544,16 +336,13 @@ function update() {
       }
       case 'gather': {
         if (e.carrying >= GATHER_AMOUNT) {
-          // 返回基地
           const base = findNearestBase(e.gx, e.gy, e.team);
           if (!base) { e.state = 'idle'; break; }
           const d = dist(e, base);
           if (d < CELL * 3) {
-            // 卸货
             if (e.team === TEAM_PLAYER) game.minerals += e.carrying;
             e.carrying = 0;
             e.gatherTimer = 0;
-            // 继续采矿
             const mineral = findNearestMineral(e.gx, e.gy);
             if (mineral) e.gatherTarget = mineral;
             else e.state = 'idle';
@@ -565,11 +354,9 @@ function update() {
           const ty = e.gatherTarget.gy * CELL + CELL / 2;
           const d = Math.sqrt((e.x - tx) ** 2 + (e.y - ty) ** 2);
           if (d < CELL) {
-            // 在矿点采矿
             e.gatherTimer++;
             if (e.gatherTimer >= GATHER_TIME) {
               e.carrying = GATHER_AMOUNT;
-              // 矿消耗
               if (mapData[e.gatherTarget.gy] && mapData[e.gatherTarget.gy][e.gatherTarget.gx] === 1) {
                 if (Math.random() < 0.15) {
                   mapData[e.gatherTarget.gy][e.gatherTarget.gx] = 0;
@@ -622,16 +409,12 @@ function update() {
     }
   }
 
-  // 更新人口
   countPop();
 
   // AI逻辑 (每120帧执行一次)
   if (game.frame % 120 === 0) enemyAI();
 
-  // 更新HUD
   updateHUD();
-
-
 }
 
 // ---- 敌方AI ----
@@ -642,7 +425,6 @@ function enemyAI() {
 
   if (!eBase) return;
 
-  // 敌方资源模拟(简化)
   const enemyWorkers = enemyUnits.filter(u => u.type === 'worker');
   const enemySoldiers = enemyUnits.filter(u => u.type !== 'worker');
 
@@ -676,11 +458,11 @@ function enemyAI() {
     const by = eBase.gy;
     if (bx + 1 < MAP_W && by + 1 < MAP_H) {
       const b = createBuilding('barracks', bx, by, TEAM_ENEMY);
-      b.buildProgress = b.maxHp; // AI建筑直接完成(简化)
+      b.buildProgress = b.maxHp;
     }
   }
 
-  // 进攻逻辑 - 士兵数量足够时发起攻击
+  // 进攻逻辑
   if (enemySoldiers.length >= 3) {
     const playerBuildings = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0);
     if (playerBuildings.length > 0) {
@@ -725,20 +507,17 @@ function render() {
       const sx = gx * CELL - camera.x;
       const sy = gy * CELL - camera.y;
 
-      // 网格线
       ctx.strokeStyle = '#1a1a1a';
       ctx.strokeRect(sx, sy, CELL, CELL);
 
       const tile = mapData[gy]?.[gx];
       if (tile === 1) {
-        // 矿石
         ctx.fillStyle = '#44f';
         ctx.font = `${CELL - 4}px Courier New`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('矿', sx + CELL / 2, sy + CELL / 2);
       } else if (tile === 2) {
-        // 岩石
         ctx.fillStyle = '#555';
         ctx.font = `${CELL - 4}px Courier New`;
         ctx.textAlign = 'center';
@@ -754,7 +533,6 @@ function render() {
     const sx = e.x - camera.x;
     const sy = e.y - camera.y;
 
-    // 视口裁剪
     if (sx < -CELL * 3 || sx > canvas.width + CELL * 3 || sy < -CELL * 3 || sy > canvas.height + CELL * 3) continue;
 
     if (e.kind === 'building') {
@@ -764,14 +542,12 @@ function render() {
       const bw = bDef.w * CELL;
       const bh = bDef.h * CELL;
 
-      // 建筑底色
       const alpha = e.buildProgress >= e.maxHp ? 0.3 : 0.15;
       ctx.fillStyle = e.team === TEAM_PLAYER ? `rgba(0,255,0,${alpha})` : `rgba(255,0,0,${alpha})`;
       ctx.fillRect(bx, by, bw, bh);
       ctx.strokeStyle = e.team === TEAM_PLAYER ? '#0a0' : '#a00';
       ctx.strokeRect(bx, by, bw, bh);
 
-      // 建筑文字
       const bColor = e.team === TEAM_PLAYER ? bDef.color : '#f44';
       ctx.fillStyle = bColor;
       ctx.font = `bold ${CELL}px Courier New`;
@@ -782,7 +558,6 @@ function render() {
         : bDef.char;
       ctx.fillText(label, bx + bw / 2, by + bh / 2);
 
-      // 生产进度
       if (e.queue.length > 0) {
         const producing = e.queue[0];
         const uDef = UNIT_DEFS[producing];
@@ -793,14 +568,11 @@ function render() {
         ctx.fillRect(bx, by + bh + 2, bw * pct, 4);
       }
 
-      // 血条
       drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, e.team);
     } else {
-      // 单位
       const uDef = UNIT_DEFS[e.type];
       const uColor = e.team === TEAM_PLAYER ? uDef.color : '#f44';
 
-      // 选中高亮
       if (game.selected.includes(e.id)) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
@@ -810,21 +582,18 @@ function render() {
         ctx.lineWidth = 1;
       }
 
-      // 单位文字
       ctx.fillStyle = uColor;
       ctx.font = `bold ${CELL - 2}px Courier New`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(uDef.char, sx, sy);
 
-      // 携带矿石指示
       if (e.carrying > 0) {
         ctx.fillStyle = '#44f';
         ctx.font = '10px Courier New';
         ctx.fillText('◆', sx + 10, sy - 10);
       }
 
-      // 状态指示
       if (e.state === 'gather') {
         ctx.fillStyle = '#0af';
         ctx.font = '9px Courier New';
@@ -839,7 +608,6 @@ function render() {
         ctx.fillText('🔨', sx + 10, sy + 10);
       }
 
-      // 血条
       drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, e.team);
     }
   }
@@ -893,7 +661,6 @@ function render() {
     ctx.fillText('按 R 重新开始', canvas.width / 2, canvas.height / 2 + 30);
   }
 
-  // 小地图
   renderMinimap();
 }
 
@@ -915,7 +682,6 @@ function renderMinimap() {
   mmCtx.fillStyle = '#000';
   mmCtx.fillRect(0, 0, mw, mh);
 
-  // 地形
   for (let gy = 0; gy < MAP_H; gy++) {
     for (let gx = 0; gx < MAP_W; gx++) {
       if (mapData[gy][gx] === 1) {
@@ -928,7 +694,6 @@ function renderMinimap() {
     }
   }
 
-  // 实体
   for (const e of entities) {
     if (e.hp <= 0) continue;
     const ex = (e.x / CELL) * sx;
@@ -942,7 +707,6 @@ function renderMinimap() {
     mmCtx.fillRect(ex - size / 2, ey - size / 2, size, size);
   }
 
-  // 视口框
   const vx = (camera.x / (MAP_W * CELL)) * mw;
   const vy = (camera.y / (MAP_H * CELL)) * mh;
   const vw = (canvas.width / (MAP_W * CELL)) * mw;
@@ -950,20 +714,6 @@ function renderMinimap() {
   mmCtx.strokeStyle = '#fff';
   mmCtx.lineWidth = 1;
   mmCtx.strokeRect(vx, vy, vw, vh);
-}
-
-// ---- 建筑放置检测 ----
-function canPlaceBuilding(type, gx, gy) {
-  const def = BUILDING_DEFS[type];
-  for (let dy = 0; dy < def.h; dy++) {
-    for (let dx = 0; dx < def.w; dx++) {
-      const tx = gx + dx;
-      const ty = gy + dy;
-      if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return false;
-      if (mapData[ty][tx] !== 0) return false;
-    }
-  }
-  return true;
 }
 
 // ---- UI更新 ----
@@ -1006,7 +756,6 @@ function updateGuide() {
   html += '<div class="guide-section">';
 
   if (first.kind === 'building') {
-    // building guide: only mouse hints (production keys are on buttons above)
     html += row('左键空地', '取消选中');
   } else if (first.kind === 'unit') {
     const hasWorker = sel.some(e => e.type === 'worker');
@@ -1061,7 +810,6 @@ function updateSidebar() {
     }
     infoEl.innerHTML = html;
 
-    // 生产按钮
     let btns = '';
     if (first.buildProgress >= first.maxHp && first.team === TEAM_PLAYER && bDef.produces) {
       const keyMap = { worker: '1', soldier: '1', ranger: '2', tank: '3' };
@@ -1075,7 +823,6 @@ function updateSidebar() {
     }
     actionsEl.innerHTML = btns;
   } else {
-    // 单位信息
     if (selectedEntities.length === 1) {
       const uDef = UNIT_DEFS[first.type];
       let html = `<span style="color:${uDef.color}">${uDef.char} ${uDef.desc}</span><br>`;
@@ -1096,7 +843,6 @@ function updateSidebar() {
       infoEl.innerHTML = html;
     }
 
-    // 工人建造按钮
     let btns = '';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
@@ -1151,7 +897,6 @@ function placeBuildingAtMouse(gx, gy) {
   game.minerals -= bDef.cost;
   const building = createBuilding(game.buildMode, gx, gy, TEAM_PLAYER);
 
-  // 派遣选中的工人去建造
   const workers = game.selected
     .map(id => entities.find(e => e.id === id))
     .filter(e => e && e.type === 'worker' && e.team === TEAM_PLAYER);
@@ -1172,25 +917,21 @@ canvas.addEventListener('mousedown', (e) => {
   const my = e.offsetY;
 
   if (e.button === 0) {
-    // 左键 - 建造模式
     if (game.buildMode) {
       const gx = Math.floor((mx + camera.x) / CELL);
       const gy = Math.floor((my + camera.y) / CELL);
       placeBuildingAtMouse(gx, gy);
       return;
     }
-    // 左键 - 开始选择/框选
     game.dragStart = { x: mx, y: my };
     game.dragEnd = null;
   }
   if (e.button === 2) {
     e.preventDefault();
-    // 右键 - 取消建造模式
     if (game.buildMode) {
       cancelBuild();
       return;
     }
-    // 右键 - 下达指令
     issueCommand(mx, my);
   }
 });
@@ -1199,7 +940,6 @@ canvas.addEventListener('mousemove', (e) => {
   const mx = e.offsetX;
   const my = e.offsetY;
 
-  // 建造预览
   if (game.buildMode) {
     game.buildPreview = {
       gx: Math.floor((mx + camera.x) / CELL),
@@ -1207,7 +947,6 @@ canvas.addEventListener('mousemove', (e) => {
     };
   }
 
-  // 框选拖拽
   if (game.dragStart) {
     game.dragEnd = { x: mx, y: my };
   }
@@ -1221,12 +960,10 @@ canvas.addEventListener('mouseup', (e) => {
     const dy = Math.abs(my - game.dragStart.y);
 
     if (dx < 5 && dy < 5) {
-      // 点击选择
       const gx = Math.floor((mx + camera.x) / CELL);
       const gy = Math.floor((my + camera.y) / CELL);
       selectAt(gx, gy, e.shiftKey);
     } else {
-      // 框选
       boxSelect(game.dragStart, { x: mx, y: my }, e.shiftKey);
     }
     game.dragStart = null;
@@ -1275,10 +1012,8 @@ function issueCommand(mx, my) {
 
   if (selectedUnits.length === 0) return;
 
-  // 检查右键目标
   const target = entityAt(gx, gy);
 
-  // 点击敌方 → 攻击
   if (target && target.team === TEAM_ENEMY) {
     for (const u of selectedUnits) {
       u.state = 'attack';
@@ -1288,7 +1023,6 @@ function issueCommand(mx, my) {
     return;
   }
 
-  // 工人点击矿石 → 采矿
   if (mapData[gy]?.[gx] === 1) {
     for (const u of selectedUnits) {
       if (u.type === 'worker') {
@@ -1301,7 +1035,6 @@ function issueCommand(mx, my) {
     return;
   }
 
-  // 工人点击未完工建筑 → 建造
   if (target && target.kind === 'building' && target.team === TEAM_PLAYER && target.buildProgress < target.maxHp) {
     for (const u of selectedUnits) {
       if (u.type === 'worker') {
@@ -1313,7 +1046,6 @@ function issueCommand(mx, my) {
     return;
   }
 
-  // 移动
   const count = selectedUnits.length;
   const cols = Math.ceil(Math.sqrt(count));
   selectedUnits.forEach((u, i) => {
@@ -1345,7 +1077,6 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape') cancelBuild();
 
-  // 快捷键
   const sel = game.selected.map(id => entities.find(en => en.id === id)).filter(Boolean);
   const selBuilding = sel.find(s => s.kind === 'building' && s.team === TEAM_PLAYER);
   const hasWorker = sel.some(s => s.type === 'worker' && s.team === TEAM_PLAYER);
