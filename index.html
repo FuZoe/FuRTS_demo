@@ -317,10 +317,18 @@ function update() {
     switch (e.state) {
       case 'move': {
         if (!e.target) { e.state = 'idle'; break; }
-        const arrived = moveToward(e, e.target.x, e.target.y, speed);
-        if (arrived) {
-          e.state = 'idle';
-          e.target = null;
+        if (e.path.length > 0) {
+          const arrived = followPath(e, speed);
+          if (arrived) {
+            e.state = 'idle';
+            e.target = null;
+          }
+        } else {
+          const arrived = moveToward(e, e.target.x, e.target.y, speed);
+          if (arrived) {
+            e.state = 'idle';
+            e.target = null;
+          }
         }
         break;
       }
@@ -329,12 +337,25 @@ function update() {
         if (!target || target.hp <= 0) {
           e.state = 'idle';
           e.attackTarget = null;
+          e.path = [];
           break;
         }
         const d = dist(e, target);
         if (d > def.range * CELL) {
-          moveToward(e, target.x, target.y, speed);
+          // 远距离用A*寻路，每60帧重算一次
+          if (e.path.length > 0) {
+            followPath(e, speed);
+          } else if (game.frame - e.pathRetryFrame > 60) {
+            const tgx = Math.floor(target.x / CELL);
+            const tgy = Math.floor(target.y / CELL);
+            setUnitPath(e, tgx, tgy);
+            e.pathRetryFrame = game.frame;
+            if (e.path.length === 0) moveToward(e, target.x, target.y, speed);
+          } else {
+            moveToward(e, target.x, target.y, speed);
+          }
         } else {
+          e.path = [];
           if (game.frame % 20 === 0) {
             target.hp -= def.atk;
             if (target.hp <= 0) {
@@ -356,11 +377,23 @@ function update() {
             if (e.team === TEAM_PLAYER) game.minerals += e.carrying;
             e.carrying = 0;
             e.gatherTimer = 0;
+            e.path = [];
             const mineral = findNearestMineral(e.gx, e.gy);
-            if (mineral) e.gatherTarget = mineral;
-            else e.state = 'idle';
+            if (mineral) {
+              e.gatherTarget = mineral;
+              setUnitPath(e, mineral.gx, mineral.gy);
+            } else {
+              e.state = 'idle';
+            }
           } else {
-            moveToward(e, base.x, base.y, speed);
+            if (e.path.length > 0) {
+              followPath(e, speed);
+            } else {
+              const bgx = Math.floor(base.x / CELL);
+              const bgy = Math.floor(base.y / CELL);
+              setUnitPath(e, bgx, bgy);
+              if (e.path.length === 0) moveToward(e, base.x, base.y, speed);
+            }
           }
         } else if (e.gatherTarget) {
           const tx = e.gatherTarget.gx * CELL + CELL / 2;
@@ -370,6 +403,7 @@ function update() {
             e.gatherTimer++;
             if (e.gatherTimer >= GATHER_TIME) {
               e.carrying = GATHER_AMOUNT;
+              e.path = [];
               if (mapData[e.gatherTarget.gy] && mapData[e.gatherTarget.gy][e.gatherTarget.gx] === 1) {
                 if (Math.random() < 0.15) {
                   mapData[e.gatherTarget.gy][e.gatherTarget.gx] = 0;
@@ -377,7 +411,12 @@ function update() {
               }
             }
           } else {
-            moveToward(e, tx, ty, speed);
+            if (e.path.length > 0) {
+              followPath(e, speed);
+            } else {
+              setUnitPath(e, e.gatherTarget.gx, e.gatherTarget.gy);
+              if (e.path.length === 0) moveToward(e, tx, ty, speed);
+            }
           }
         } else {
           e.state = 'idle';
@@ -387,11 +426,19 @@ function update() {
       case 'build': {
         if (!e.buildTarget) { e.state = 'idle'; break; }
         const building = entities.find(b => b.id === e.buildTarget);
-        if (!building || building.hp <= 0) { e.state = 'idle'; break; }
+        if (!building || building.hp <= 0) { e.state = 'idle'; e.path = []; break; }
         const d = dist(e, building);
         if (d > CELL * 3) {
-          moveToward(e, building.x, building.y, speed);
+          if (e.path.length > 0) {
+            followPath(e, speed);
+          } else {
+            const bgx = Math.floor(building.x / CELL);
+            const bgy = Math.floor(building.y / CELL);
+            setUnitPath(e, bgx, bgy);
+            if (e.path.length === 0) moveToward(e, building.x, building.y, speed);
+          }
         } else {
+          e.path = [];
           building.buildProgress = Math.min(building.maxHp, building.buildProgress + 2);
           if (building.buildProgress >= building.maxHp) {
             addLog(`建筑完成: ${BUILDING_DEFS[building.type].desc}`);
@@ -422,6 +469,9 @@ function update() {
     }
   }
 
+  // 单位碰撞分离
+  applyUnitSeparation();
+
   countPop();
 
   // AI逻辑 (每120帧执行一次)
@@ -448,6 +498,7 @@ function enemyAI() {
       if (mineral) {
         w.gatherTarget = mineral;
         w.state = 'gather';
+        setUnitPath(w, mineral.gx, mineral.gy);
       }
     }
   }
@@ -484,6 +535,8 @@ function enemyAI() {
         if (s.state === 'idle') {
           s.attackTarget = target.id;
           s.state = 'attack';
+          s.path = [];
+          s.pathRetryFrame = 0;
         }
       }
       if (game.frame % 600 === 0) addLog('⚠️ 敌军发起进攻！');
@@ -1064,6 +1117,8 @@ function issueCommand(mx, my) {
     for (const u of selectedUnits) {
       u.state = 'attack';
       u.attackTarget = target.id;
+      u.path = [];
+      u.pathRetryFrame = 0;
     }
     addLog(`⚔️ 命令攻击!`);
     return;
@@ -1075,6 +1130,7 @@ function issueCommand(mx, my) {
         u.state = 'gather';
         u.gatherTarget = { gx, gy };
         u.gatherTimer = 0;
+        setUnitPath(u, gx, gy);
       }
     }
     addLog('⛏️ 前往采矿');
@@ -1086,6 +1142,9 @@ function issueCommand(mx, my) {
       if (u.type === 'worker') {
         u.state = 'build';
         u.buildTarget = target.id;
+        const bgx = Math.floor(target.x / CELL);
+        const bgy = Math.floor(target.y / CELL);
+        setUnitPath(u, bgx, bgy);
       }
     }
     addLog('🔨 前往建造');
@@ -1097,11 +1156,14 @@ function issueCommand(mx, my) {
   selectedUnits.forEach((u, i) => {
     const row = Math.floor(i / cols);
     const col = i % cols;
+    const tgx = gx + col;
+    const tgy = gy + row;
     u.state = 'move';
     u.target = {
-      x: gx * CELL + CELL / 2 + col * CELL,
-      y: gy * CELL + CELL / 2 + row * CELL,
+      x: tgx * CELL + CELL / 2,
+      y: tgy * CELL + CELL / 2,
     };
+    setUnitPath(u, tgx, tgy);
     u.attackTarget = null;
     u.gatherTarget = null;
   });
