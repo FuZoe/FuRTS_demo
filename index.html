@@ -70,6 +70,7 @@ body {
 .btn:hover { background: #040; }
 .btn:disabled { color: #050; border-color: #030; cursor: not-allowed; }
 .btn .cost { color: #0a0; float: right; }
+.btn .btn-key { color: #ff0; font-weight: bold; margin-right: 2px; }
 #info {
   margin-top: 10px;
   padding-top: 6px;
@@ -129,12 +130,11 @@ body {
 <div id="sidebar">
   <h3>📋 选中信息</h3>
   <div id="info">未选中任何单位</div>
-  <h3 style="margin-top:10px;">🏗️ 操作面板</h3>
+  <h3 style="margin-top:10px;">🎮 操作面板</h3>
   <div id="actions"></div>
+  <div id="guide"></div>
   <h3 style="margin-top:10px;">🗺️ 小地图</h3>
   <canvas id="minimap" width="200" height="150"></canvas>
-  <h3 style="margin-top:10px;">📖 操作指南</h3>
-  <div id="guide"></div>
 </div>
 <div id="log"></div>
 
@@ -981,7 +981,7 @@ function updateGuide() {
   let html = '';
 
   if (game.buildMode) {
-    html += '<div class="guide-section"><h4>建造模式</h4>';
+    html += '<div class="guide-section">';
     html += row('左键', '放置建筑');
     html += row('右键/Esc', '取消建造');
     html += '</div>';
@@ -992,7 +992,7 @@ function updateGuide() {
   const sel = game.selected.map(id => entities.find(e => e.id === id)).filter(Boolean);
 
   if (sel.length === 0) {
-    html += '<div class="guide-section"><h4>基础操作</h4>';
+    html += '<div class="guide-section">';
     html += row('左键', '选中单位/建筑');
     html += row('左键拖拽', '框选多个单位');
     html += row('WASD', '滚动地图');
@@ -1003,42 +1003,21 @@ function updateGuide() {
   }
 
   const first = sel[0];
+  html += '<div class="guide-section">';
 
-  if (first.kind === 'building' && first.team === TEAM_PLAYER) {
-    html += `<div class="guide-section"><h4>当前: ${BUILDING_DEFS[first.type].char} ${BUILDING_DEFS[first.type].desc}</h4>`;
-    if (first.type === 'base') {
-      html += row('[1]', '生产农民 50矿');
-    } else if (first.type === 'barracks') {
-      html += row('[1]', '生产步兵 75矿');
-      html += row('[2]', '生产弓手 100矿');
-    } else if (first.type === 'factory') {
-      html += row('[3]', '生产坦克 150矿');
-    }
+  if (first.kind === 'building') {
+    // building guide: only mouse hints (production keys are on buttons above)
     html += row('左键空地', '取消选中');
-    html += '</div>';
   } else if (first.kind === 'unit') {
     const hasWorker = sel.some(e => e.type === 'worker');
-    const hasCombat = sel.some(e => e.type !== 'worker');
-    const types = [...new Set(sel.map(e => UNIT_DEFS[e.type].char))].join('');
-    html += `<div class="guide-section"><h4>当前: ${types} ×${sel.length}</h4>`;
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
-    if (hasWorker) {
-      html += row('右键矿石', '采矿');
-      html += '</div><div class="guide-section"><h4>建造快捷键</h4>';
-      html += row('[4]', '建人口房 50矿');
-      html += row('[2]', '建兵营 150矿');
-      html += row('[3]', '建工厂 200矿');
-    }
+    if (hasWorker) html += row('右键矿石', '采矿');
     html += row('左键空地', '取消选中');
-    html += '</div>';
   }
 
-  html += '<div class="guide-section"><h4>通用</h4>';
   html += row('WASD', '滚动地图');
-  html += row('Esc', '取消建造');
   html += '</div>';
-
   guideEl.innerHTML = html;
 }
 
@@ -1085,10 +1064,12 @@ function updateSidebar() {
     // 生产按钮
     let btns = '';
     if (first.buildProgress >= first.maxHp && first.team === TEAM_PLAYER && bDef.produces) {
+      const keyMap = { worker: '1', soldier: '1', ranger: '2', tank: '3' };
       for (const uType of bDef.produces) {
         const uDef = UNIT_DEFS[uType];
+        const key = keyMap[uType] || '';
         btns += `<button class="btn" onclick="trainUnit('${uType}', ${first.id})">
-          ${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
+          <span class="btn-key">[${key}]</span> ${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
         </button>`;
       }
     }
@@ -1119,10 +1100,12 @@ function updateSidebar() {
     let btns = '';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
+      const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
       for (const [bType, bDef] of Object.entries(BUILDING_DEFS)) {
         if (bType === 'base') continue;
+        const key = buildKeyMap[bType] || '';
         btns += `<button class="btn" onclick="startBuild('${bType}')" ${game.minerals < bDef.cost ? 'disabled' : ''}>
-          ${bDef.char} ${bDef.desc} <span class="cost">${bDef.cost}矿</span>
+          ${key ? `<span class="btn-key">[${key}]</span> ` : ''}${bDef.char} ${bDef.desc} <span class="cost">${bDef.cost}矿</span>
         </button>`;
       }
     }
