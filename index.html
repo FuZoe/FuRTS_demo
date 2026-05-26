@@ -70,6 +70,7 @@ body {
 .btn:hover { background: #040; }
 .btn:disabled { color: #050; border-color: #030; cursor: not-allowed; }
 .btn .cost { color: #0a0; float: right; }
+.btn .btn-key { color: #ff0; font-weight: bold; margin-right: 2px; }
 #info {
   margin-top: 10px;
   padding-top: 6px;
@@ -129,40 +130,11 @@ body {
 <div id="sidebar">
   <h3>📋 选中信息</h3>
   <div id="info">未选中任何单位</div>
-  <h3 style="margin-top:10px;">🏗️ 操作面板</h3>
+  <h3 style="margin-top:10px;">🎮 操作面板</h3>
   <div id="actions"></div>
+  <div id="guide"></div>
   <h3 style="margin-top:10px;">🗺️ 小地图</h3>
   <canvas id="minimap" width="200" height="150"></canvas>
-  <h3 style="margin-top:10px;">📖 操作指南</h3>
-  <div id="guide">
-    <div class="guide-section">
-      <h4>鼠标操作</h4>
-      <div class="guide-row"><span class="guide-key">左键</span><span class="guide-desc">选中单位/建筑</span></div>
-      <div class="guide-row"><span class="guide-key">左键拖拽</span><span class="guide-desc">框选多个单位</span></div>
-      <div class="guide-row"><span class="guide-key">右键空地</span><span class="guide-desc">移动</span></div>
-      <div class="guide-row"><span class="guide-key">右键敌人</span><span class="guide-desc">攻击</span></div>
-      <div class="guide-row"><span class="guide-key">右键矿石</span><span class="guide-desc">采矿(需选农民)</span></div>
-    </div>
-    <div class="guide-section">
-      <h4>选中农民(工)时</h4>
-      <div class="guide-row"><span class="guide-key">[4]</span><span class="guide-desc">建人口房 50矿</span></div>
-      <div class="guide-row"><span class="guide-key">[2]</span><span class="guide-desc">建兵营 150矿</span></div>
-      <div class="guide-row"><span class="guide-key">[3]</span><span class="guide-desc">建工厂 200矿</span></div>
-    </div>
-    <div class="guide-section">
-      <h4>选中建筑时</h4>
-      <div class="guide-row"><span class="guide-key">基地[1]</span><span class="guide-desc">生产农民 50矿</span></div>
-      <div class="guide-row"><span class="guide-key">兵营[1]</span><span class="guide-desc">步兵75矿</span></div>
-      <div class="guide-row"><span class="guide-key">兵营[2]</span><span class="guide-desc">弓手100矿</span></div>
-      <div class="guide-row"><span class="guide-key">工厂[3]</span><span class="guide-desc">坦克150矿</span></div>
-    </div>
-    <div class="guide-section">
-      <h4>其他</h4>
-      <div class="guide-row"><span class="guide-key">WASD</span><span class="guide-desc">滚动地图</span></div>
-      <div class="guide-row"><span class="guide-key">Esc</span><span class="guide-desc">取消建造</span></div>
-      <div class="guide-row"><span class="guide-key">目标</span><span class="guide-desc">摧毁左上敌方基地</span></div>
-    </div>
-  </div>
 </div>
 <div id="log"></div>
 
@@ -367,8 +339,7 @@ function formatTime(frame) {
   return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 }
 
-addLog('⚔️ FuRTS 启动！操作指南见右侧边栏底部。');
-addLog('快捷键: 1=生产 2=建兵营 3=建工厂 4=建人口房');
+addLog('⚔️ FuRTS 启动！操作指南见右侧边栏。');
 
 // ---- 工具函数 ----
 function dist(a, b) {
@@ -1004,7 +975,54 @@ function updateHUD() {
   document.getElementById('hudTime').textContent = formatTime(game.frame);
 }
 
+function updateGuide() {
+  const guideEl = document.getElementById('guide');
+  const row = (k, v) => `<div class="guide-row"><span class="guide-key">${k}</span><span class="guide-desc">${v}</span></div>`;
+  let html = '';
+
+  if (game.buildMode) {
+    html += '<div class="guide-section">';
+    html += row('左键', '放置建筑');
+    html += row('右键/Esc', '取消建造');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
+  const sel = game.selected.map(id => entities.find(e => e.id === id)).filter(Boolean);
+
+  if (sel.length === 0) {
+    html += '<div class="guide-section">';
+    html += row('左键', '选中单位/建筑');
+    html += row('左键拖拽', '框选多个单位');
+    html += row('WASD', '滚动地图');
+    html += row('目标', '摧毁左上敌方基地');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
+  const first = sel[0];
+  html += '<div class="guide-section">';
+
+  if (first.kind === 'building') {
+    // building guide: only mouse hints (production keys are on buttons above)
+    html += row('左键空地', '取消选中');
+  } else if (first.kind === 'unit') {
+    const hasWorker = sel.some(e => e.type === 'worker');
+    html += row('右键空地', '移动');
+    html += row('右键敌人', '攻击');
+    if (hasWorker) html += row('右键矿石', '采矿');
+    html += row('左键空地', '取消选中');
+  }
+
+  html += row('WASD', '滚动地图');
+  html += '</div>';
+  guideEl.innerHTML = html;
+}
+
 function updateSidebar() {
+  updateGuide();
   const infoEl = document.getElementById('info');
   const actionsEl = document.getElementById('actions');
 
@@ -1046,10 +1064,12 @@ function updateSidebar() {
     // 生产按钮
     let btns = '';
     if (first.buildProgress >= first.maxHp && first.team === TEAM_PLAYER && bDef.produces) {
+      const keyMap = { worker: '1', soldier: '1', ranger: '2', tank: '3' };
       for (const uType of bDef.produces) {
         const uDef = UNIT_DEFS[uType];
+        const key = keyMap[uType] || '';
         btns += `<button class="btn" onclick="trainUnit('${uType}', ${first.id})">
-          ${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
+          <span class="btn-key">[${key}]</span> ${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
         </button>`;
       }
     }
@@ -1080,10 +1100,12 @@ function updateSidebar() {
     let btns = '';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
+      const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
       for (const [bType, bDef] of Object.entries(BUILDING_DEFS)) {
         if (bType === 'base') continue;
+        const key = buildKeyMap[bType] || '';
         btns += `<button class="btn" onclick="startBuild('${bType}')" ${game.minerals < bDef.cost ? 'disabled' : ''}>
-          ${bDef.char} ${bDef.desc} <span class="cost">${bDef.cost}矿</span>
+          ${key ? `<span class="btn-key">[${key}]</span> ` : ''}${bDef.char} ${bDef.desc} <span class="cost">${bDef.cost}矿</span>
         </button>`;
       }
     }
@@ -1358,6 +1380,7 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
+updateGuide();
 gameLoop();
 </script>
 </body>
