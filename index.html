@@ -71,6 +71,17 @@ body {
 .btn:disabled { color: #050; border-color: #030; cursor: not-allowed; }
 .btn .cost { color: #0a0; float: right; }
 .btn .btn-key { color: #ff0; font-weight: bold; margin-right: 2px; }
+#groupBar { display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 4px; }
+.grp-btn {
+  width: 22px; height: 22px;
+  background: #020; color: #555;
+  border: 1px solid #333; cursor: pointer;
+  font: bold 11px 'Courier New', monospace;
+  text-align: center; line-height: 20px;
+  padding: 0;
+}
+.grp-btn.active { color: #ff0; border-color: #ff0; background: #220; }
+.grp-btn.selected { color: #fff; border-color: #fff; background: #030; }
 #info {
   margin-top: 10px;
   padding-top: 6px;
@@ -124,10 +135,11 @@ body {
   <span class="hud-item"><span class="hud-label">单位: </span><span class="hud-value" id="hudUnits">0</span></span>
   <span class="hud-item"><span class="hud-label">敌军: </span><span class="hud-value" id="hudEnemies">0</span></span>
   <span class="hud-item"><span class="hud-label">时间: </span><span class="hud-value" id="hudTime">00:00</span></span>
-  <span class="hud-item" style="margin-left:auto;color:#0a0;font-size:12px;">左键选择/框选 | 右键指令 | 1-4快捷键</span>
+  <span class="hud-item" style="margin-left:auto;color:#0a0;font-size:12px;">左键选择/框选 | 右键指令 | Ctrl+数字编队</span>
 </div>
 <canvas id="gameCanvas"></canvas>
 <div id="sidebar">
+  <div id="groupBar"></div>
   <h3>📋 选中信息</h3>
   <div id="info">未选中任何单位</div>
   <h3 style="margin-top:10px;">🎮 操作面板</h3>
@@ -183,6 +195,7 @@ const game = {
   maxPop: 10,
   frame: 0,
   selected: [],
+  controlGroups: {},
   dragStart: null,
   dragEnd: null,
   buildMode: null,
@@ -582,6 +595,20 @@ function render() {
         ctx.lineWidth = 1;
       }
 
+      // 编队编号
+      if (e.team === TEAM_PLAYER) {
+        for (const [gNum, ids] of Object.entries(game.controlGroups)) {
+          if (ids.includes(e.id)) {
+            ctx.fillStyle = '#ff0';
+            ctx.font = 'bold 10px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(gNum, sx, sy - CELL / 2 - 1);
+            break;
+          }
+        }
+      }
+
       ctx.fillStyle = uColor;
       ctx.font = `bold ${CELL - 2}px Courier New`;
       ctx.textAlign = 'center';
@@ -745,6 +772,8 @@ function updateGuide() {
     html += '<div class="guide-section">';
     html += row('左键', '选中单位/建筑');
     html += row('左键拖拽', '框选多个单位');
+    html += row('Ctrl+数字', '分配编队');
+    html += row('数字键', '召回编队');
     html += row('WASD', '滚动地图');
     html += row('目标', '摧毁左上敌方基地');
     html += '</div>';
@@ -762,6 +791,7 @@ function updateGuide() {
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
     if (hasWorker) html += row('右键矿石', '采矿');
+    html += row('Ctrl+数字', '分配编队');
     html += row('左键空地', '取消选中');
   }
 
@@ -770,8 +800,24 @@ function updateGuide() {
   guideEl.innerHTML = html;
 }
 
+function updateGroupBar() {
+  const bar = document.getElementById('groupBar');
+  let html = '';
+  for (let i = 1; i <= 9; i++) {
+    const ids = game.controlGroups[i];
+    const alive = ids ? ids.filter(id => entities.find(e => e.id === id && e.hp > 0)) : [];
+    if (ids) game.controlGroups[i] = alive;
+    const hasUnits = alive.length > 0;
+    const isSelected = hasUnits && alive.length === game.selected.length && alive.every(id => game.selected.includes(id));
+    const cls = isSelected ? 'grp-btn selected' : (hasUnits ? 'grp-btn active' : 'grp-btn');
+    html += `<button class="${cls}" onclick="recallControlGroup(${i})" title="${hasUnits ? alive.length + '个单位' : '空'}">${i}</button>`;
+  }
+  bar.innerHTML = html;
+}
+
 function updateSidebar() {
   updateGuide();
+  updateGroupBar();
   const infoEl = document.getElementById('info');
   const actionsEl = document.getElementById('actions');
 
@@ -1071,30 +1117,74 @@ mmCanvas.addEventListener('click', (e) => {
   clampCamera();
 });
 
+// ---- 编队系统 ----
+function assignControlGroup(num) {
+  if (game.selected.length === 0) return;
+  game.controlGroups[num] = [...game.selected];
+  addLog(`编队 ${num}: ${game.selected.length} 个单位`);
+  updateSidebar();
+}
+
+function recallControlGroup(num) {
+  const ids = game.controlGroups[num];
+  if (!ids || ids.length === 0) return false;
+  // 过滤已死亡的实体
+  const alive = ids.filter(id => entities.find(e => e.id === id && e.hp > 0));
+  game.controlGroups[num] = alive;
+  if (alive.length === 0) return false;
+  game.selected = [...alive];
+  // 将镜头移到编队中心
+  const units = alive.map(id => entities.find(e => e.id === id)).filter(Boolean);
+  const cx = units.reduce((s, u) => s + u.x, 0) / units.length;
+  const cy = units.reduce((s, u) => s + u.y, 0) / units.length;
+  camera.x = cx - canvas.width / 2;
+  camera.y = cy - canvas.height / 2;
+  clampCamera();
+  updateSidebar();
+  return true;
+}
+
 // 键盘
 window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
 
   if (e.key === 'Escape') cancelBuild();
 
-  const sel = game.selected.map(id => entities.find(en => en.id === id)).filter(Boolean);
-  const selBuilding = sel.find(s => s.kind === 'building' && s.team === TEAM_PLAYER);
-  const hasWorker = sel.some(s => s.type === 'worker' && s.team === TEAM_PLAYER);
+  const numKey = parseInt(e.key);
+  const isNum = numKey >= 1 && numKey <= 9;
 
-  if (e.key === '1') {
-    if (selBuilding && selBuilding.type === 'base') trainUnit('worker', selBuilding.id);
-    else if (selBuilding && selBuilding.type === 'barracks') trainUnit('soldier', selBuilding.id);
+  // Ctrl+数字: 分配编队
+  if (isNum && e.ctrlKey) {
+    e.preventDefault();
+    assignControlGroup(numKey);
+    return;
   }
-  if (e.key === '2') {
-    if (hasWorker) startBuild('barracks');
-    else if (selBuilding && selBuilding.type === 'barracks') trainUnit('ranger', selBuilding.id);
-  }
-  if (e.key === '3') {
-    if (hasWorker) startBuild('factory');
-    else if (selBuilding && selBuilding.type === 'factory') trainUnit('tank', selBuilding.id);
-  }
-  if (e.key === '4') {
-    if (hasWorker) startBuild('supply');
+
+  // 数字键: 先尝试原有快捷键，无效则召回编队
+  if (isNum && !e.ctrlKey) {
+    const sel = game.selected.map(id => entities.find(en => en.id === id)).filter(Boolean);
+    const selBuilding = sel.find(s => s.kind === 'building' && s.team === TEAM_PLAYER);
+    const hasWorker = sel.some(s => s.type === 'worker' && s.team === TEAM_PLAYER);
+    let handled = false;
+
+    if (numKey === 1) {
+      if (selBuilding && selBuilding.type === 'base') { trainUnit('worker', selBuilding.id); handled = true; }
+      else if (selBuilding && selBuilding.type === 'barracks') { trainUnit('soldier', selBuilding.id); handled = true; }
+    }
+    if (numKey === 2) {
+      if (hasWorker) { startBuild('barracks'); handled = true; }
+      else if (selBuilding && selBuilding.type === 'barracks') { trainUnit('ranger', selBuilding.id); handled = true; }
+    }
+    if (numKey === 3) {
+      if (hasWorker) { startBuild('factory'); handled = true; }
+      else if (selBuilding && selBuilding.type === 'factory') { trainUnit('tank', selBuilding.id); handled = true; }
+    }
+    if (numKey === 4) {
+      if (hasWorker) { startBuild('supply'); handled = true; }
+    }
+
+    if (!handled) recallControlGroup(numKey);
+    return;
   }
 
   if (e.key === 'r' && game.gameOver) location.reload();
@@ -1111,7 +1201,7 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
-updateGuide();
+updateSidebar();
 gameLoop();
 </script>
 </body>
