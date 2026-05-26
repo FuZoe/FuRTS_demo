@@ -134,35 +134,7 @@ body {
   <h3 style="margin-top:10px;">🗺️ 小地图</h3>
   <canvas id="minimap" width="200" height="150"></canvas>
   <h3 style="margin-top:10px;">📖 操作指南</h3>
-  <div id="guide">
-    <div class="guide-section">
-      <h4>鼠标操作</h4>
-      <div class="guide-row"><span class="guide-key">左键</span><span class="guide-desc">选中单位/建筑</span></div>
-      <div class="guide-row"><span class="guide-key">左键拖拽</span><span class="guide-desc">框选多个单位</span></div>
-      <div class="guide-row"><span class="guide-key">右键空地</span><span class="guide-desc">移动</span></div>
-      <div class="guide-row"><span class="guide-key">右键敌人</span><span class="guide-desc">攻击</span></div>
-      <div class="guide-row"><span class="guide-key">右键矿石</span><span class="guide-desc">采矿(需选农民)</span></div>
-    </div>
-    <div class="guide-section">
-      <h4>选中农民(工)时</h4>
-      <div class="guide-row"><span class="guide-key">[4]</span><span class="guide-desc">建人口房 50矿</span></div>
-      <div class="guide-row"><span class="guide-key">[2]</span><span class="guide-desc">建兵营 150矿</span></div>
-      <div class="guide-row"><span class="guide-key">[3]</span><span class="guide-desc">建工厂 200矿</span></div>
-    </div>
-    <div class="guide-section">
-      <h4>选中建筑时</h4>
-      <div class="guide-row"><span class="guide-key">基地[1]</span><span class="guide-desc">生产农民 50矿</span></div>
-      <div class="guide-row"><span class="guide-key">兵营[1]</span><span class="guide-desc">步兵75矿</span></div>
-      <div class="guide-row"><span class="guide-key">兵营[2]</span><span class="guide-desc">弓手100矿</span></div>
-      <div class="guide-row"><span class="guide-key">工厂[3]</span><span class="guide-desc">坦克150矿</span></div>
-    </div>
-    <div class="guide-section">
-      <h4>其他</h4>
-      <div class="guide-row"><span class="guide-key">WASD</span><span class="guide-desc">滚动地图</span></div>
-      <div class="guide-row"><span class="guide-key">Esc</span><span class="guide-desc">取消建造</span></div>
-      <div class="guide-row"><span class="guide-key">目标</span><span class="guide-desc">摧毁左上敌方基地</span></div>
-    </div>
-  </div>
+  <div id="guide"></div>
 </div>
 <div id="log"></div>
 
@@ -367,8 +339,7 @@ function formatTime(frame) {
   return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 }
 
-addLog('⚔️ FuRTS 启动！操作指南见右侧边栏底部。');
-addLog('快捷键: 1=生产 2=建兵营 3=建工厂 4=建人口房');
+addLog('⚔️ FuRTS 启动！操作指南见右侧边栏。');
 
 // ---- 工具函数 ----
 function dist(a, b) {
@@ -1004,7 +975,75 @@ function updateHUD() {
   document.getElementById('hudTime').textContent = formatTime(game.frame);
 }
 
+function updateGuide() {
+  const guideEl = document.getElementById('guide');
+  const row = (k, v) => `<div class="guide-row"><span class="guide-key">${k}</span><span class="guide-desc">${v}</span></div>`;
+  let html = '';
+
+  if (game.buildMode) {
+    html += '<div class="guide-section"><h4>建造模式</h4>';
+    html += row('左键', '放置建筑');
+    html += row('右键/Esc', '取消建造');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
+  const sel = game.selected.map(id => entities.find(e => e.id === id)).filter(Boolean);
+
+  if (sel.length === 0) {
+    html += '<div class="guide-section"><h4>基础操作</h4>';
+    html += row('左键', '选中单位/建筑');
+    html += row('左键拖拽', '框选多个单位');
+    html += row('WASD', '滚动地图');
+    html += row('目标', '摧毁左上敌方基地');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
+  const first = sel[0];
+
+  if (first.kind === 'building' && first.team === TEAM_PLAYER) {
+    html += `<div class="guide-section"><h4>当前: ${BUILDING_DEFS[first.type].char} ${BUILDING_DEFS[first.type].desc}</h4>`;
+    if (first.type === 'base') {
+      html += row('[1]', '生产农民 50矿');
+    } else if (first.type === 'barracks') {
+      html += row('[1]', '生产步兵 75矿');
+      html += row('[2]', '生产弓手 100矿');
+    } else if (first.type === 'factory') {
+      html += row('[3]', '生产坦克 150矿');
+    }
+    html += row('左键空地', '取消选中');
+    html += '</div>';
+  } else if (first.kind === 'unit') {
+    const hasWorker = sel.some(e => e.type === 'worker');
+    const hasCombat = sel.some(e => e.type !== 'worker');
+    const types = [...new Set(sel.map(e => UNIT_DEFS[e.type].char))].join('');
+    html += `<div class="guide-section"><h4>当前: ${types} ×${sel.length}</h4>`;
+    html += row('右键空地', '移动');
+    html += row('右键敌人', '攻击');
+    if (hasWorker) {
+      html += row('右键矿石', '采矿');
+      html += '</div><div class="guide-section"><h4>建造快捷键</h4>';
+      html += row('[4]', '建人口房 50矿');
+      html += row('[2]', '建兵营 150矿');
+      html += row('[3]', '建工厂 200矿');
+    }
+    html += row('左键空地', '取消选中');
+    html += '</div>';
+  }
+
+  html += '<div class="guide-section"><h4>通用</h4>';
+  html += row('WASD', '滚动地图');
+  html += row('Esc', '取消建造');
+  html += '</div>';
+
+  guideEl.innerHTML = html;
+}
+
 function updateSidebar() {
+  updateGuide();
   const infoEl = document.getElementById('info');
   const actionsEl = document.getElementById('actions');
 
@@ -1358,6 +1397,7 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
+updateGuide();
 gameLoop();
 </script>
 </body>
