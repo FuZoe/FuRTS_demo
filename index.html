@@ -95,6 +95,125 @@ body {
   z-index: 10;
   color: #0a0;
 }
+#tutorial-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.92);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#tutorial-box {
+  background: #111;
+  border: 2px solid #0f0;
+  border-radius: 8px;
+  padding: 30px 40px;
+  max-width: 620px;
+  width: 90%;
+  color: #0f0;
+  font-family: 'Courier New', monospace;
+  box-shadow: 0 0 40px rgba(0,255,0,0.2);
+}
+#tutorial-box h2 {
+  text-align: center;
+  font-size: 28px;
+  margin-bottom: 20px;
+  text-shadow: 0 0 10px #0f0;
+}
+#tutorial-box table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+#tutorial-box td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #030;
+  font-size: 13px;
+  vertical-align: top;
+}
+#tutorial-box td:first-child {
+  color: #ff0;
+  white-space: nowrap;
+  width: 110px;
+  font-weight: bold;
+}
+#tutorial-box .section-title {
+  color: #0f0;
+  font-size: 14px;
+  font-weight: bold;
+  margin-top: 16px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #0a0;
+  padding-bottom: 4px;
+}
+#tutorial-box .start-btn {
+  display: block;
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px;
+  background: #020;
+  color: #0f0;
+  border: 2px solid #0f0;
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.2s;
+}
+#tutorial-box .start-btn:hover {
+  background: #040;
+  box-shadow: 0 0 15px rgba(0,255,0,0.3);
+}
+#help-btn {
+  position: fixed;
+  top: 40px;
+  left: 6px;
+  z-index: 11;
+  background: #020;
+  color: #0f0;
+  border: 1px solid #0a0;
+  padding: 4px 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+#help-btn:hover { background: #040; }
+#guide-bar {
+  position: fixed;
+  top: 36px;
+  left: 60px;
+  right: 220px;
+  height: 28px;
+  background: rgba(40,40,0,0.9);
+  border-bottom: 1px solid #aa0;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 13px;
+  z-index: 10;
+  color: #ff0;
+}
+#guide-bar .step-num {
+  background: #ff0;
+  color: #000;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: bold;
+  margin-right: 8px;
+  font-size: 12px;
+}
+#guide-bar .skip-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #aa0;
+  color: #aa0;
+  padding: 2px 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+#guide-bar .skip-btn:hover { color: #ff0; border-color: #ff0; }
 </style>
 </head>
 <body>
@@ -116,6 +235,36 @@ body {
   <canvas id="minimap" width="200" height="150"></canvas>
 </div>
 <div id="log"></div>
+
+<div id="tutorial-overlay">
+  <div id="tutorial-box">
+    <h2>FuRTS 文字版RTS</h2>
+    <div class="section-title">基础操作</div>
+    <table>
+      <tr><td>左键点击</td><td>选中单位或建筑</td></tr>
+      <tr><td>左键拖拽</td><td>框选多个单位</td></tr>
+      <tr><td>右键点击</td><td>对选中单位下达指令（移动/攻击/采矿）</td></tr>
+      <tr><td>WASD/方向键</td><td>滚动地图</td></tr>
+    </table>
+    <div class="section-title">建造与生产</div>
+    <table>
+      <tr><td>选中农民(工)</td><td>按 <b>4</b>=建人口房(50矿) <b>2</b>=建兵营(150矿) <b>3</b>=建工厂(200矿)</td></tr>
+      <tr><td>选中基地(基)</td><td>按 <b>1</b>=生产农民(50矿)</td></tr>
+      <tr><td>选中兵营(营)</td><td>按 <b>1</b>=生产步兵(75矿) <b>2</b>=生产弓手(100矿)</td></tr>
+      <tr><td>选中工厂(厂)</td><td>按 <b>3</b>=生产坦克(150矿)</td></tr>
+    </table>
+    <div class="section-title">游戏目标</div>
+    <table>
+      <tr><td>采矿</td><td>选中农民(工) → 右键点击蓝色的<span style="color:#44f">矿</span> → 自动采集循环</td></tr>
+      <tr><td>扩军</td><td>建兵营/工厂 → 生产战斗单位</td></tr>
+      <tr><td>进攻</td><td>选中战斗单位 → 右键点击敌方(红色)单位或建筑</td></tr>
+      <tr><td>胜利条件</td><td>摧毁左上角敌方基地(红色<span style="color:#f44">基</span>)</td></tr>
+    </table>
+    <button class="start-btn" onclick="closeTutorial()">开 始 游 戏</button>
+  </div>
+</div>
+<button id="help-btn" onclick="openTutorial()" style="display:none">? 帮助</button>
+<div id="guide-bar" style="display:none"><span class="step-num">1</span><span id="guide-text"></span><button class="skip-btn" onclick="skipGuide()">跳过引导</button></div>
 
 <script>
 // ============================================================
@@ -318,8 +467,54 @@ function formatTime(frame) {
   return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 }
 
-addLog('⚔️ FuRTS 启动！选择单位后右键下达指令。');
-addLog('快捷键: 1=建农民 2=建兵营 3=建工厂 4=建人口房');
+addLog('⚔️ FuRTS 启动！点击"? 帮助"可随时查看操作指南。');
+
+// ---- 新手引导系统 ----
+const guideSteps = [
+  { text: '框选你的3个农民(工)：在它们周围拖拽左键', check: () => game.selected.length >= 2 && game.selected.some(id => { const e = entities.find(x => x.id === id); return e && e.type === 'worker'; }) },
+  { text: '右键点击蓝色的矿开始采矿', check: () => entities.some(e => e.team === TEAM_PLAYER && e.type === 'worker' && e.state === 'gather') },
+  { text: '等待采矿中... 矿石会自动增长', check: () => game.minerals > 200 },
+  { text: '选中一个农民(工)，按 4 建造人口房', check: () => game.buildMode === 'supply' || entities.some(e => e.team === TEAM_PLAYER && e.type === 'supply') },
+  { text: '左键点击地面放置人口房（如已建好可继续）', check: () => entities.some(e => e.team === TEAM_PLAYER && e.type === 'supply' && e.buildProgress >= e.maxHp) },
+  { text: '左键点击基地(基)，按 1 生产一个农民', check: () => entities.filter(e => e.team === TEAM_PLAYER && e.type === 'worker' && e.hp > 0).length > 3 },
+  { text: '引导完成！试试建兵营(选农民按2)生产军队消灭敌人吧！', check: () => false },
+];
+let guideStep = 0;
+let guideActive = true;
+let tutorialOpen = true;
+
+function closeTutorial() {
+  document.getElementById('tutorial-overlay').style.display = 'none';
+  document.getElementById('help-btn').style.display = 'block';
+  document.getElementById('guide-bar').style.display = 'flex';
+  tutorialOpen = false;
+  game.paused = false;
+  updateGuide();
+}
+function openTutorial() {
+  document.getElementById('tutorial-overlay').style.display = 'flex';
+  document.getElementById('help-btn').style.display = 'none';
+  tutorialOpen = true;
+  game.paused = true;
+}
+function skipGuide() {
+  guideActive = false;
+  document.getElementById('guide-bar').style.display = 'none';
+}
+function updateGuide() {
+  if (!guideActive || tutorialOpen) return;
+  if (guideStep < guideSteps.length && guideSteps[guideStep].check()) {
+    guideStep++;
+  }
+  if (guideStep >= guideSteps.length) {
+    skipGuide();
+    return;
+  }
+  document.querySelector('#guide-bar .step-num').textContent = guideStep + 1;
+  document.getElementById('guide-text').textContent = guideSteps[guideStep].text;
+}
+
+game.paused = true; // 开局暂停等待教程关闭
 
 // ---- 工具函数 ----
 function dist(a, b) {
@@ -610,6 +805,9 @@ function update() {
 
   // 更新HUD
   updateHUD();
+
+  // 更新引导
+  if (guideActive && game.frame % 30 === 0) updateGuide();
 }
 
 // ---- 敌方AI ----
