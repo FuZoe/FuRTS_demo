@@ -401,10 +401,12 @@ function applyUnitSeparation() {
   const n = alive.length;
   for (let i = 0; i < n; i++) {
     const a = alive[i];
-    const ra = UNIT_DEFS[a.type].radius * CELL;
+    const aIsMoving = a.path && a.path.length > 0;
+    const ra = UNIT_DEFS[a.type].radius * CELL * (aIsMoving ? 0.5 : 1);
     for (let j = i + 1; j < n; j++) {
       const b = alive[j];
-      const rb = UNIT_DEFS[b.type].radius * CELL;
+      const bIsMoving = b.path && b.path.length > 0;
+      const rb = UNIT_DEFS[b.type].radius * CELL * (bIsMoving ? 0.5 : 1);
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const d = Math.sqrt(dx * dx + dy * dy);
