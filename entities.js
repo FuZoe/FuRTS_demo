@@ -1,7 +1,7 @@
 // ============================================================
 //  FuRTS - 实体模块
 //  单位/建筑定义、创建、寻路、碰撞、实体工具函数
-//  依赖: map.js (CELL, MAP_W, MAP_H, mapData)
+//  依赖: map.js (CELL, MAP_W, MAP_H, mapLayers, TERRAIN_PROPS)
 // ============================================================
 
 const TEAM_PLAYER = 0;
@@ -75,7 +75,7 @@ function createBuilding(type, gx, gy, team) {
   for (let dy = 0; dy < def.h; dy++) {
     for (let dx = 0; dx < def.w; dx++) {
       if (gy + dy < MAP_H && gx + dx < MAP_W) {
-        mapData[gy + dy][gx + dx] = 3;
+        mapLayers.building[gy + dy][gx + dx] = e.id;
       }
     }
   }
@@ -108,7 +108,7 @@ function findNearestMineral(fromX, fromY) {
   let best = null, bestDist = Infinity;
   for (let y = 0; y < MAP_H; y++) {
     for (let x = 0; x < MAP_W; x++) {
-      if (mapData[y][x] === 1) {
+      if (mapLayers.resource[y][x] === 1) {
         const d = gridDist(fromX, fromY, x, y);
         if (d < bestDist) { bestDist = d; best = { gx: x, gy: y }; }
       }
@@ -153,8 +153,16 @@ function getPlayerBuildings() {
 
 function isWalkable(gx, gy) {
   if (gx < 0 || gx >= MAP_W || gy < 0 || gy >= MAP_H) return false;
-  const tile = mapData[gy][gx];
-  return tile === 0 || tile === 1; // 空地和矿石可通行，岩石(2)和建筑(3)不可通行
+  const terrainType = mapLayers.terrain[gy][gx];
+  if (!TERRAIN_PROPS[terrainType].walkable) return false;
+  if (mapLayers.obstacle[gy][gx] !== 0) return false;
+  if (mapLayers.building[gy][gx] !== 0) return false;
+  return true;
+}
+
+function getTerrainSpeedMult(gx, gy) {
+  if (gx < 0 || gx >= MAP_W || gy < 0 || gy >= MAP_H) return 1.0;
+  return TERRAIN_PROPS[mapLayers.terrain[gy][gx]].speedMult;
 }
 
 // 二叉堆（最小堆）
@@ -282,7 +290,8 @@ function findPath(sx, sy, ex, ey) {
       }
       const nk = key(nx, ny);
       if (closed.has(nk)) continue;
-      const ng = curG + dir.cost;
+      const terrainMult = TERRAIN_PROPS[mapLayers.terrain[ny][nx]].speedMult;
+      const ng = curG + dir.cost / terrainMult;
       if (gMap[nk] === undefined || ng < gMap[nk]) {
         gMap[nk] = ng;
         parentMap[nk] = ck;
@@ -365,8 +374,7 @@ function moveToward(entity, tx, ty, speed) {
   const ngx = Math.floor(nx / CELL);
   const ngy = Math.floor(ny / CELL);
   if (ngx >= 0 && ngx < MAP_W && ngy >= 0 && ngy < MAP_H) {
-    const tile = mapData[ngy][ngx];
-    if (tile === 2 || tile === 3) {
+    if (!isWalkable(ngx, ngy)) {
       // 遇到障碍或建筑，尝试绕行
       const alt1x = entity.x + (dy / d) * speed;
       const alt1y = entity.y - (dx / d) * speed;
@@ -485,7 +493,10 @@ function canPlaceBuilding(type, gx, gy) {
       const tx = gx + dx;
       const ty = gy + dy;
       if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return false;
-      if (mapData[ty][tx] !== 0) return false;
+      if (mapLayers.terrain[ty][tx] === TERRAIN_WATER) return false;
+      if (mapLayers.resource[ty][tx] !== 0) return false;
+      if (mapLayers.obstacle[ty][tx] !== 0) return false;
+      if (mapLayers.building[ty][tx] !== 0) return false;
     }
   }
   return true;
