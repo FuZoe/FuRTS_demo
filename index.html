@@ -314,7 +314,7 @@ function update() {
 
     // -- 单位逻辑 --
     const def = UNIT_DEFS[e.type];
-    const speed = def.speed;
+    const speed = def.speed * getTerrainSpeedMult(e.gx, e.gy);
 
     // 自动反击
     if (e.state === 'idle' || e.state === 'move') {
@@ -415,9 +415,9 @@ function update() {
             if (e.gatherTimer >= GATHER_TIME) {
               e.carrying = GATHER_AMOUNT;
               e.path = [];
-              if (mapData[e.gatherTarget.gy] && mapData[e.gatherTarget.gy][e.gatherTarget.gx] === 1) {
+              if (mapLayers.resource[e.gatherTarget.gy]?.[e.gatherTarget.gx] === 1) {
                 if (Math.random() < 0.15) {
-                  mapData[e.gatherTarget.gy][e.gatherTarget.gx] = 0;
+                  mapLayers.resource[e.gatherTarget.gy][e.gatherTarget.gx] = 0;
                 }
               }
             }
@@ -471,7 +471,7 @@ function update() {
         for (let dy = 0; dy < bDef.h; dy++) {
           for (let dx = 0; dx < bDef.w; dx++) {
             if (dead.gy + dy < MAP_H && dead.gx + dx < MAP_W) {
-              mapData[dead.gy + dy][dead.gx + dx] = 0;
+              mapLayers.building[dead.gy + dy][dead.gx + dx] = 0;
             }
           }
         }
@@ -630,27 +630,38 @@ function render() {
   const endGX = Math.min(MAP_W, startGX + Math.ceil(canvas.width / CELL) + 1);
   const endGY = Math.min(MAP_H, startGY + Math.ceil(canvas.height / CELL) + 1);
 
-  // 绘制网格和地形
+  // 绘制网格和地形（分层渲染）
+  ctx.font = `${CELL - 4}px Courier New`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   for (let gy = startGY; gy < endGY; gy++) {
     for (let gx = startGX; gx < endGX; gx++) {
       const sx = gx * CELL - camera.x;
       const sy = gy * CELL - camera.y;
 
+      // 地形底色
+      const terrainType = mapLayers.terrain[gy]?.[gx] ?? 0;
+      const tp = TERRAIN_PROPS[terrainType];
+      if (tp.color !== '#0a1a0a') {
+        ctx.fillStyle = tp.color;
+        ctx.fillRect(sx, sy, CELL, CELL);
+      }
+      if (tp.char) {
+        ctx.fillStyle = tp.charColor;
+        ctx.fillText(tp.char, sx + CELL / 2, sy + CELL / 2);
+      }
+
       ctx.strokeStyle = '#1a1a1a';
       ctx.strokeRect(sx, sy, CELL, CELL);
 
-      const tile = mapData[gy]?.[gx];
-      if (tile === 1) {
+      // 资源层
+      if (mapLayers.resource[gy]?.[gx] === 1) {
         ctx.fillStyle = '#44f';
-        ctx.font = `${CELL - 4}px Courier New`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
         ctx.fillText('矿', sx + CELL / 2, sy + CELL / 2);
-      } else if (tile === 2) {
+      }
+      // 障碍层
+      if (mapLayers.obstacle[gy]?.[gx] === 1) {
         ctx.fillStyle = '#555';
-        ctx.font = `${CELL - 4}px Courier New`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
         ctx.fillText('岩', sx + CELL / 2, sy + CELL / 2);
       }
     }
@@ -865,10 +876,19 @@ function renderMinimap() {
     for (let gx = 0; gx < MAP_W; gx++) {
       const fog = window.fogEnabled ? fogMap[gy][gx] : FOG_VISIBLE;
       if (fog === FOG_UNEXPLORED) continue;
-      if (mapData[gy][gx] === 1) {
+      // 地形层
+      const terrainType = mapLayers.terrain[gy][gx];
+      if (terrainType !== TERRAIN_GRASS) {
+        mmCtx.fillStyle = TERRAIN_PROPS[terrainType].color;
+        mmCtx.fillRect(gx * sx, gy * sy, sx, sy);
+      }
+      // 资源层
+      if (mapLayers.resource[gy][gx] === 1) {
         mmCtx.fillStyle = '#00a';
         mmCtx.fillRect(gx * sx, gy * sy, sx, sy);
-      } else if (mapData[gy][gx] === 2) {
+      }
+      // 障碍层
+      if (mapLayers.obstacle[gy][gx] === 1) {
         mmCtx.fillStyle = '#333';
         mmCtx.fillRect(gx * sx, gy * sy, sx, sy);
       }
@@ -1314,7 +1334,7 @@ function issueCommand(mx, my) {
     return;
   }
 
-  if (mapData[gy]?.[gx] === 1) {
+  if (mapLayers.resource[gy]?.[gx] === 1) {
     for (const u of selectedUnits) {
       if (u.type === 'worker') {
         u.state = 'gather';

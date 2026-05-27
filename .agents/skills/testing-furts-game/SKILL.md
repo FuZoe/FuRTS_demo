@@ -46,7 +46,7 @@ description: Test the FuRTS text-based RTS game demo end-to-end. Use when verify
 - Units should navigate around obstacles (rocks=岩, buildings) using A* paths
 - To test: select a unit and right-click on the far side of an obstacle
 - Console verification: `findPath(sx, sy, ex, ey)` should return non-null array of {x,y} waypoints
-- `isWalkable(gx, gy)` should return false for rocks (mapData=2) and buildings (mapData=3)
+- `isWalkable(gx, gy)` should return false for rocks (`obstacle` layer), buildings (`building` layer), and water (`terrain` layer)
 
 ### 6. Unit Collision Separation
 - Multiple units moved to the same spot should form a cluster, not stack on one pixel
@@ -55,8 +55,8 @@ description: Test the FuRTS text-based RTS game demo end-to-end. Use when verify
 
 ### 7. Building Blocking
 - Units should path around buildings, not through them
-- Old bug: `moveToward()` only checked rocks (mapData=2), not buildings (mapData=3)
-- Fix: `isWalkable()` now checks both, and A* paths avoid both
+- `isWalkable()` checks terrain (water=impassable), obstacle, and building layers
+- A* paths avoid all non-walkable tiles
 
 ## Critical Testing Tips
 
@@ -69,10 +69,11 @@ window.enemyAI = function() {}; // disable
 Re-enable when testing AI behavior: `window.enemyAI = window._origEnemyAI;`
 
 ### Use Console for Setup
-The browser console has access to all game globals (`entities`, `mapData`, `camera`, `CELL`, `MAP_W`, `MAP_H`, etc.). Use it to:
+The browser console has access to all game globals (`entities`, `mapLayers`, `camera`, `CELL`, `MAP_W`, `MAP_H`, etc.). Use it to:
 - Teleport units: `w.x = gx * CELL + CELL/2; w.y = gy * CELL + CELL/2;`
 - Move camera: `camera.x = gx * CELL; camera.y = gy * CELL;`
-- Create obstacles: `mapData[gy][gx] = 2;` (rock) or `= 3;` (building marker)
+- Create obstacles: `mapLayers.obstacle[gy][gx] = 1;` (rock)
+- Set terrain: `mapLayers.terrain[gy][gx] = TERRAIN_WATER;` (water, impassable)
 - Check walkability: `isWalkable(gx, gy)`
 - Compute paths: `findPath(sx, sy, ex, ey)`
 - Find entities: `entities.filter(e => e.type === 'worker' && e.team === 0)`
@@ -80,7 +81,7 @@ The browser console has access to all game globals (`entities`, `mapData`, `came
 ### Creating Adversarial Test Scenarios
 For pathfinding tests, random rock placement may not create good obstacles. Use console to create a rock wall:
 ```javascript
-for (let y = 20; y <= 30; y++) mapData[y][40] = 2; // vertical wall
+for (let y = 20; y <= 30; y++) mapLayers.obstacle[y][40] = 1; // vertical rock wall
 ```
 Then teleport a unit to one side and command it to the other side.
 
@@ -94,7 +95,8 @@ Then teleport a unit to one side and command it to the other side.
 ### Known Edge Cases
 - **Collision at d=0**: When units are at the exact same pixel, `applyUnitSeparation()` skips them (the `d > 0.01` guard prevents division-by-zero). In normal gameplay this rarely occurs since the movement command distributes units to different grid offsets.
 - **Restart key**: Press `R` to restart the game (only works after game over)
-- **Rock placement is random**: Each game has different rock positions. Use `mapData` to find or create obstacles.
+- **Rock placement is random**: Each game has different rock positions. Use `mapLayers.obstacle` to find or create obstacles.
+- **Terrain types**: Map has 4 terrain types (grass/sand/water/hill) accessed via `mapLayers.terrain`. Sand slows units (0.7x speed), water blocks movement.
 
 ## Tips
 - Player base is in bottom-right, enemy base in top-left
