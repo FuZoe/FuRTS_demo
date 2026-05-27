@@ -396,17 +396,31 @@ function moveToward(entity, tx, ty, speed) {
 
 const SEPARATION_FORCE = 0.8;
 
+function isNearWall(e) {
+  const gx = Math.floor(e.x / CELL);
+  const gy = Math.floor(e.y / CELL);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (!isWalkable(gx + dx, gy + dy)) return true;
+    }
+  }
+  return false;
+}
+
 function applyUnitSeparation() {
   const alive = entities.filter(e => e.kind === 'unit' && e.hp > 0);
   const n = alive.length;
   for (let i = 0; i < n; i++) {
     const a = alive[i];
     const aIsMoving = a.path && a.path.length > 0;
-    const ra = UNIT_DEFS[a.type].radius * CELL * (aIsMoving ? 0.5 : 1);
+    const aScale = aIsMoving ? (isNearWall(a) ? 0.15 : 0.5) : 1;
+    const ra = UNIT_DEFS[a.type].radius * CELL * aScale;
     for (let j = i + 1; j < n; j++) {
       const b = alive[j];
       const bIsMoving = b.path && b.path.length > 0;
-      const rb = UNIT_DEFS[b.type].radius * CELL * (bIsMoving ? 0.5 : 1);
+      const bScale = bIsMoving ? (isNearWall(b) ? 0.15 : 0.5) : 1;
+      const rb = UNIT_DEFS[b.type].radius * CELL * bScale;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const d = Math.sqrt(dx * dx + dy * dy);
