@@ -309,6 +309,23 @@ function setUnitPath(entity, targetGx, targetGy) {
 // 沿路径移动，返回 true 表示已到达终点
 function followPath(entity, speed) {
   if (entity.path.length === 0) return true;
+
+  // 检查前方路径点是否仍可通行（应对新建筑等动态障碍）
+  const checkAhead = Math.min(entity.path.length, 3);
+  for (let i = 0; i < checkAhead; i++) {
+    const p = entity.path[i];
+    const pgx = Math.floor(p.x / CELL);
+    const pgy = Math.floor(p.y / CELL);
+    if (!isWalkable(pgx, pgy)) {
+      const lastWp = entity.path[entity.path.length - 1];
+      const tgx = Math.floor(lastWp.x / CELL);
+      const tgy = Math.floor(lastWp.y / CELL);
+      setUnitPath(entity, tgx, tgy);
+      if (entity.path.length === 0) return true;
+      break;
+    }
+  }
+
   const wp = entity.path[0];
   const dx = wp.x - entity.x;
   const dy = wp.y - entity.y;
@@ -399,10 +416,21 @@ function applyUnitSeparation() {
         const aMoving = a.state !== 'idle' && a.state !== 'gather' ? 1.0 : 0.3;
         const bMoving = b.state !== 'idle' && b.state !== 'gather' ? 1.0 : 0.3;
         const total = aMoving + bMoving;
-        a.x -= nx * overlap * (bMoving / total);
-        a.y -= ny * overlap * (bMoving / total);
-        b.x += nx * overlap * (aMoving / total);
-        b.y += ny * overlap * (aMoving / total);
+        let pushAx = nx * overlap * (bMoving / total);
+        let pushAy = ny * overlap * (bMoving / total);
+        let pushBx = nx * overlap * (aMoving / total);
+        let pushBy = ny * overlap * (aMoving / total);
+        // 如果推动后会进入障碍物，则不推（避免狭窄通道卡死）
+        const newAgx = Math.floor((a.x - pushAx) / CELL);
+        const newAgy = Math.floor((a.y - pushAy) / CELL);
+        if (!isWalkable(newAgx, newAgy)) { pushAx = 0; pushAy = 0; }
+        const newBgx = Math.floor((b.x + pushBx) / CELL);
+        const newBgy = Math.floor((b.y + pushBy) / CELL);
+        if (!isWalkable(newBgx, newBgy)) { pushBx = 0; pushBy = 0; }
+        a.x -= pushAx;
+        a.y -= pushAy;
+        b.x += pushBx;
+        b.y += pushBy;
       }
     }
   }
