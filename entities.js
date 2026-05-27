@@ -17,6 +17,10 @@ const UNIT_DEFS = {
   soldier: { char: '兵', hp: 80, speed: 1.2, atk: 12, range: 1.5, cost: 75,  popCost: 1, buildTime: 200, color: '#ff0', desc: '步兵 - 近战', radius: 0.4, vision: 6 },
   tank:    { char: '坦', hp: 200, speed: 0.8, atk: 30, range: 4, cost: 150, popCost: 2, buildTime: 400, color: '#f80', desc: '坦克 - 重火力', radius: 0.6, vision: 6 },
   ranger:  { char: '弓', hp: 60, speed: 1.0, atk: 15, range: 5, cost: 100, popCost: 1, buildTime: 250, color: '#0ff', desc: '弓手 - 远程', radius: 0.4, vision: 8 },
+  // ---- 丧尸兵种（仅敌方在「亡者之夜」地图生产，参考 SC2 Dead of Night）----
+  zombie:    { char: '尸', hp: 40,  speed: 0.6, atk: 8,  range: 1, cost: 25,  popCost: 1, buildTime: 80,  color: '#4a0', desc: '丧尸 - 低速群攻', radius: 0.4, vision: 3 },
+  berserker: { char: '猎', hp: 60,  speed: 1.8, atk: 15, range: 1, cost: 60,  popCost: 1, buildTime: 120, color: '#a40', desc: '猎杀体 - 高速突袭', radius: 0.4, vision: 4 },
+  bloater:   { char: '腐', hp: 150, speed: 0.5, atk: 20, range: 2, cost: 100, popCost: 2, buildTime: 250, color: '#640', desc: '腐尸怪 - 重型攻城', radius: 0.6, vision: 3 },
 };
 
 // ---- 建筑类型定义 ----
