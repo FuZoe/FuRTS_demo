@@ -137,6 +137,85 @@ body {
   font-weight: bold;
 }
 .guide-desc { color: #0a0; }
+
+/* ---- 地图选择 overlay ---- */
+#mapSelectOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  color: #0f0;
+}
+#mapSelectInner {
+  background: #050805;
+  border: 1px solid #0a0;
+  padding: 28px 32px 24px;
+  max-width: 760px;
+  width: 90%;
+  box-shadow: 0 0 24px rgba(0, 255, 0, 0.2);
+}
+#mapSelectInner h2 {
+  font-size: 22px;
+  color: #0f0;
+  margin-bottom: 6px;
+  text-align: center;
+  letter-spacing: 2px;
+}
+#mapSelectInner .map-tagline {
+  color: #0a0;
+  font-size: 12px;
+  text-align: center;
+  margin-bottom: 18px;
+}
+#mapCardsContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  justify-content: center;
+}
+.map-card {
+  width: 220px;
+  background: #020;
+  border: 1px solid #0a0;
+  padding: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  text-align: center;
+}
+.map-card:hover {
+  background: #041004;
+  border-color: #0f0;
+  transform: translateY(-2px);
+}
+.map-card canvas {
+  display: block;
+  width: 200px;
+  height: 150px;
+  background: #000;
+  border: 1px solid #050;
+  margin: 0 auto 8px;
+  image-rendering: pixelated;
+}
+.map-card-title {
+  color: #0f0;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+.map-card-desc {
+  color: #0a0;
+  font-size: 11px;
+  line-height: 1.5;
+  min-height: 32px;
+}
+.map-card-size {
+  color: #ff0;
+  font-size: 10px;
+  margin-top: 4px;
+}
 </style>
 </head>
 <body>
@@ -160,6 +239,15 @@ body {
   <canvas id="minimap" width="200" height="150"></canvas>
 </div>
 <div id="log"></div>
+
+<!-- 地图选择 overlay (开局显示, 选择后隐藏) -->
+<div id="mapSelectOverlay">
+  <div id="mapSelectInner">
+    <h2>FuRTS - 选择地图</h2>
+    <div class="map-tagline">点击下方任一地图卡片开始游戏</div>
+    <div id="mapCardsContainer"></div>
+  </div>
+</div>
 
 <script src="map.js"></script>
 <script src="entities.js"></script>
@@ -217,21 +305,47 @@ const game = {
   keysDown: {},
 };
 
-// ---- 初始单位 ----
-const playerBase = createBuilding('base', MAP_W - 6, MAP_H - 6, TEAM_PLAYER);
-createUnit('worker', MAP_W - 8, MAP_H - 5, TEAM_PLAYER);
-createUnit('worker', MAP_W - 8, MAP_H - 7, TEAM_PLAYER);
-createUnit('worker', MAP_W - 4, MAP_H - 7, TEAM_PLAYER);
+// ---- 初始单位 / 基地放置（按地图配置） ----
+// 这部分逻辑放进 setupGameForMap()，开局时由地图选择界面触发
+function setupGameForMap(mapDef) {
+  game.currentMapId = mapDef.id;
 
-const enemyBase = createBuilding('base', 3, 3, TEAM_ENEMY);
-createUnit('worker', 6, 4, TEAM_ENEMY);
-createUnit('worker', 6, 6, TEAM_ENEMY);
-createUnit('soldier', 8, 5, TEAM_ENEMY);
+  let playerBase;
+  if (mapDef.id === 'dead_of_night') {
+    // 玩家基地居中 (80×60 地图)，基地占 2×2 格子，中心放在 (38, 28)
+    playerBase = createBuilding('base', 38, 28, TEAM_PLAYER);
+    createUnit('worker', 36, 32, TEAM_PLAYER);
+    createUnit('worker', 38, 32, TEAM_PLAYER);
+    createUnit('worker', 40, 32, TEAM_PLAYER);
+    // 4 个丧尸出生点（敌方基地），地图四角
+    createBuilding('base', 5, 5, TEAM_ENEMY);    // NW
+    createBuilding('base', 73, 5, TEAM_ENEMY);   // NE
+    createBuilding('base', 5, 53, TEAM_ENEMY);   // SW
+    createBuilding('base', 73, 53, TEAM_ENEMY);  // SE
+    addLog('🧟 「亡者之夜」开始！四面围城，注意守住基地的四条通道。');
+  } else {
+    // 默认地图：玩家右下，敌方左上
+    playerBase = createBuilding('base', MAP_W - 6, MAP_H - 6, TEAM_PLAYER);
+    createUnit('worker', MAP_W - 8, MAP_H - 5, TEAM_PLAYER);
+    createUnit('worker', MAP_W - 8, MAP_H - 7, TEAM_PLAYER);
+    createUnit('worker', MAP_W - 4, MAP_H - 7, TEAM_PLAYER);
+    createBuilding('base', 3, 3, TEAM_ENEMY);
+    createUnit('worker', 6, 4, TEAM_ENEMY);
+    createUnit('worker', 6, 6, TEAM_ENEMY);
+    createUnit('soldier', 8, 5, TEAM_ENEMY);
+    addLog('⚔️ FuRTS 启动！操作指南见右侧边栏。');
+  }
 
-// 移动相机到玩家基地
-camera.x = playerBase.x - canvas.width / 2;
-camera.y = playerBase.y - canvas.height / 2;
-clampCamera();
+  // 移动相机到玩家基地
+  resizeCanvas();
+  camera.x = playerBase.x - canvas.width / 2;
+  camera.y = playerBase.y - canvas.height / 2;
+  clampCamera();
+
+  // 初始化时立即计算一次视野, 避免开局第一帧前画面全黑
+  updateFog();
+  updateSidebar();
+}
 
 // ---- 日志系统 ----
 const logEl = document.getElementById('log');
@@ -248,8 +362,6 @@ function formatTime(frame) {
   const m = Math.floor(s / 60);
   return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 }
-
-addLog('⚔️ FuRTS 启动！操作指南见右侧边栏。');
 
 // ---- 人口计算 ----
 function countPop() {
@@ -540,11 +652,14 @@ function updateFog() {
   }
 }
 
-// 初始化时立即计算一次视野, 避免开局第一帧前画面全黑
-updateFog();
+// 注: 初始视野计算移到 setupGameForMap() 中，在地图初始化之后才执行
 
 // ---- 敌方AI ----
 function enemyAI() {
+  if (game.currentMapId === 'dead_of_night') {
+    enemyAIDeadOfNight();
+    return;
+  }
   const enemyUnits = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'unit');
   const enemyBuildings = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'building');
   const eBase = enemyBuildings.find(b => b.type === 'base');
@@ -604,6 +719,54 @@ function enemyAI() {
       }
       if (game.frame % 600 === 0) addLog('⚠️ 敌军发起进攻！');
     }
+  }
+}
+
+// 「亡者之夜」专属敌方 AI:
+// 四角的敌方基地周期性生产丧尸/猎杀体/腐尸怪，全部攻击玩家中央基地。
+function enemyAIDeadOfNight() {
+  const enemyBases = entities.filter(
+    e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'building' && e.type === 'base'
+  );
+  if (enemyBases.length === 0) return;
+
+  // 每个出生点保持 1~2 个生产队列
+  for (const eBase of enemyBases) {
+    if (eBase.buildProgress < eBase.maxHp) continue;
+    if (eBase.queue.length >= 2) continue;
+    // 70% 丧尸 / 20% 猎杀体 / 10% 腐尸怪
+    const r = Math.random();
+    let unitType = 'zombie';
+    if (r > 0.9) unitType = 'bloater';
+    else if (r > 0.7) unitType = 'berserker';
+    eBase.queue.push(unitType);
+  }
+
+  // 所有空闲的丧尸系单位 → 攻击玩家基地
+  const playerBase = entities.find(
+    e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'building' && e.type === 'base'
+  );
+  if (!playerBase) return;
+
+  const ZOMBIE_TYPES = new Set(['zombie', 'berserker', 'bloater']);
+  const zombies = entities.filter(
+    e =>
+      e.team === TEAM_ENEMY &&
+      e.hp > 0 &&
+      e.kind === 'unit' &&
+      ZOMBIE_TYPES.has(e.type) &&
+      e.state === 'idle'
+  );
+  for (const z of zombies) {
+    z.attackTarget = playerBase.id;
+    z.state = 'attack';
+    z.path = [];
+    z.pathRetryFrame = 0;
+  }
+
+  // 每 ~10 秒提示一次丧尸潮汐
+  if (game.frame > 0 && game.frame % 600 === 0) {
+    addLog('🧟 一波丧尸正从四面八方涌来！');
   }
 }
 
@@ -745,7 +908,9 @@ function render() {
       drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, e.team);
     } else {
       const uDef = UNIT_DEFS[e.type];
-      const uColor = e.team === TEAM_PLAYER ? uDef.color : '#f44';
+      // 丧尸系单位保留自身的暗色，便于与普通敌军区分
+      const isZombieType = e.type === 'zombie' || e.type === 'berserker' || e.type === 'bloater';
+      const uColor = e.team === TEAM_PLAYER ? uDef.color : (isZombieType ? uDef.color : '#f44');
 
       if (game.selected.includes(e.id)) {
         ctx.strokeStyle = '#fff';
@@ -1558,14 +1723,122 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ---- 主循环 ----
+let _gameLoopStarted = false;
 function gameLoop() {
   update();
   render();
   requestAnimationFrame(gameLoop);
 }
 
-updateSidebar();
-gameLoop();
+// ============================================================
+//  地图选择界面 (开局显示, 选择后启动游戏)
+// ============================================================
+function renderMapThumbnail(canvas, mapDef) {
+  const W = canvas.width;
+  const H = canvas.height;
+  const tctx = canvas.getContext('2d');
+  // 调用 initFn 让 mapLayers 反映该地图的布局 (会覆盖之前的状态, 但选择后会再调用一次)
+  mapDef.initFn();
+  const mw = mapDef.mapW;
+  const mh = mapDef.mapH;
+  const sx = W / mw;
+  const sy = H / mh;
+
+  // 背景
+  tctx.fillStyle = '#0a1a0a';
+  tctx.fillRect(0, 0, W, H);
+
+  for (let gy = 0; gy < mh; gy++) {
+    for (let gx = 0; gx < mw; gx++) {
+      const terrainType = mapLayers.terrain[gy][gx];
+      if (terrainType !== TERRAIN_GRASS) {
+        tctx.fillStyle = TERRAIN_PROPS[terrainType].color;
+        tctx.fillRect(gx * sx, gy * sy, Math.ceil(sx), Math.ceil(sy));
+      }
+      if (mapLayers.resource[gy][gx] === 1) {
+        tctx.fillStyle = '#44f';
+        tctx.fillRect(gx * sx, gy * sy, Math.max(1, sx), Math.max(1, sy));
+      }
+    }
+  }
+
+  // 关键标记：玩家基地 (绿) / 敌方出生点 (红)
+  function dot(gx, gy, color, size) {
+    tctx.fillStyle = color;
+    tctx.fillRect(gx * sx - size / 2, gy * sy - size / 2, size, size);
+  }
+  if (mapDef.id === 'dead_of_night') {
+    dot(39, 29, '#0f0', 8); // 玩家中央基地
+    dot(6, 6, '#f44', 6);    // NW
+    dot(74, 6, '#f44', 6);   // NE
+    dot(6, 54, '#f44', 6);   // SW
+    dot(74, 54, '#f44', 6);  // SE
+  } else {
+    dot(mapDef.mapW - 5, mapDef.mapH - 5, '#0f0', 8); // 玩家
+    dot(4, 4, '#f44', 6); // 敌方
+  }
+}
+
+function showMapSelection() {
+  const overlay = document.getElementById('mapSelectOverlay');
+  const container = document.getElementById('mapCardsContainer');
+  container.innerHTML = '';
+
+  MAP_REGISTRY.forEach((mapDef) => {
+    const card = document.createElement('div');
+    card.className = 'map-card';
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = 200;
+    thumbCanvas.height = 150;
+    const title = document.createElement('div');
+    title.className = 'map-card-title';
+    title.textContent = mapDef.name;
+    const desc = document.createElement('div');
+    desc.className = 'map-card-desc';
+    desc.textContent = mapDef.desc;
+    const size = document.createElement('div');
+    size.className = 'map-card-size';
+    size.textContent = `${mapDef.mapW} × ${mapDef.mapH}`;
+    card.appendChild(thumbCanvas);
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(size);
+    card.addEventListener('click', () => startGame(mapDef.id));
+    container.appendChild(card);
+
+    // 渲染缩略图 (会调用 mapDef.initFn() 让 mapLayers 反映其布局)
+    try {
+      renderMapThumbnail(thumbCanvas, mapDef);
+    } catch (err) {
+      console.warn('Failed to render thumbnail for', mapDef.id, err);
+    }
+  });
+
+  overlay.style.display = 'flex';
+}
+
+function startGame(mapId) {
+  const mapDef = MAP_REGISTRY.find(m => m.id === mapId);
+  if (!mapDef) {
+    console.error('Unknown map id:', mapId);
+    return;
+  }
+  // 重新调用一次确保 mapLayers / fogMap 是该地图的干净状态
+  mapDef.initFn();
+  setupGameForMap(mapDef);
+
+  // 隐藏地图选择界面
+  document.getElementById('mapSelectOverlay').style.display = 'none';
+
+  // 启动主循环（仅启动一次）
+  if (!_gameLoopStarted) {
+    _gameLoopStarted = true;
+    gameLoop();
+  }
+}
+
+// 开局展示地图选择界面
+showMapSelection();
 </script>
 </body>
 </html>

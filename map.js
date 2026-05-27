@@ -1,11 +1,13 @@
 // ============================================================
 //  FuRTS - 地图模块（分层系统）
 //  terrain / resource / obstacle / building 四层地图数据
+//  支持多张地图，每张地图可定制 MAP_W / MAP_H
 // ============================================================
 
 const CELL = 24;
-const MAP_W = 60;
-const MAP_H = 40;
+// 注意：MAP_W / MAP_H 由地图初始化函数通过 setMapDimensions(w, h) 设置
+let MAP_W = 60;
+let MAP_H = 40;
 
 // ---- 地形类型常量 ----
 const TERRAIN_GRASS = 0;   // 草地 - 可通行
@@ -34,6 +36,11 @@ const mapLayers = {
   building: [],
 };
 
+function setMapDimensions(w, h) {
+  MAP_W = w;
+  MAP_H = h;
+}
+
 function createEmptyLayer(defaultVal) {
   const layer = [];
   for (let y = 0; y < MAP_H; y++) {
@@ -57,11 +64,14 @@ function initMapLayers() {
 const FOG_UNEXPLORED = 0;
 const FOG_EXPLORED = 1;
 const FOG_VISIBLE = 2;
+// 保持 fogMap 为同一个数组引用（便于其他模块直接持有引用），仅清空并重填
 const fogMap = [];
-for (let y = 0; y < MAP_H; y++) {
-  fogMap[y] = [];
-  for (let x = 0; x < MAP_W; x++) {
-    fogMap[y][x] = FOG_UNEXPLORED;
+function initFogMap() {
+  fogMap.length = 0;
+  for (let y = 0; y < MAP_H; y++) {
+    const row = [];
+    for (let x = 0; x < MAP_W; x++) row.push(FOG_UNEXPLORED);
+    fogMap.push(row);
   }
 }
 
@@ -72,6 +82,19 @@ function placeMineral(cx, cy, count) {
     const dy = cy + Math.floor(Math.random() * 4) - 2;
     if (dx >= 0 && dx < MAP_W && dy >= 0 && dy < MAP_H) {
       mapLayers.resource[dy][dx] = 1;
+    }
+  }
+}
+
+// 固定位置的矩形矿区（用于亡者之夜地图，避免随机）
+function placeMineralRect(x0, y0, w, h) {
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      const x = x0 + dx;
+      const y = y0 + dy;
+      if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) {
+        mapLayers.resource[y][x] = 1;
+      }
     }
   }
 }
@@ -90,9 +113,24 @@ function placeTerrainPatch(cx, cy, radius, type) {
   }
 }
 
+// 矩形地形（用于亡者之夜地图的水墙等固定结构）
+function placeTerrainRect(x0, y0, w, h, type) {
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      const x = x0 + dx;
+      const y = y0 + dy;
+      if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) {
+        mapLayers.terrain[y][x] = type;
+      }
+    }
+  }
+}
+
 // ---- 默认地图初始化 ----
 function initDefaultMap() {
+  setMapDimensions(60, 40);
   initMapLayers();
+  initFogMap();
 
   // 地形：沙地区域
   placeTerrainPatch(28, 18, 4, TERRAIN_SAND);
@@ -139,5 +177,86 @@ function initDefaultMap() {
   }
 }
 
-// 初始化默认地图
-initDefaultMap();
+// ============================================================
+//  亡者之夜地图 (Dead of Night) - 80×60 固定布局
+//  参考 SC2「亡者之夜」: 玩家基地居中, 四面水墙+4条咽喉通道,
+//  四角丧尸出生点, 沙地减速带, 高地防御点。
+// ============================================================
+function initDeadOfNightMap() {
+  setMapDimensions(80, 60);
+  initMapLayers();
+  initFogMap();
+
+  // ---- 沙地减速带（基地外围一圈，让敌方在接近基地时减速） ----
+  placeTerrainRect(20, 20, 40, 20, TERRAIN_SAND);
+
+  // 玩家基地区域回填草地（保证基地可放置 & 单位不减速）
+  placeTerrainRect(34, 24, 12, 12, TERRAIN_GRASS);
+
+  // ---- 四面水墙（围城屏障）+ 4 条咽喉通道 ----
+  // 北水墙: y=14..16, x=10..69, 中央留通道 x=37..42
+  placeTerrainRect(10, 14, 60, 3, TERRAIN_WATER);
+  placeTerrainRect(37, 14, 6, 3, TERRAIN_GRASS); // 北通道
+  // 南水墙: y=43..45
+  placeTerrainRect(10, 43, 60, 3, TERRAIN_WATER);
+  placeTerrainRect(37, 43, 6, 3, TERRAIN_GRASS); // 南通道
+  // 西水墙: x=14..16, y=17..42, 留通道 y=27..32
+  placeTerrainRect(14, 17, 3, 26, TERRAIN_WATER);
+  placeTerrainRect(14, 27, 3, 6, TERRAIN_GRASS); // 西通道
+  // 东水墙: x=63..65
+  placeTerrainRect(63, 17, 3, 26, TERRAIN_WATER);
+  placeTerrainRect(63, 27, 3, 6, TERRAIN_GRASS); // 东通道
+
+  // ---- 通道两侧高地（防御塔的好位置） ----
+  // 北通道两侧
+  placeTerrainRect(33, 12, 3, 5, TERRAIN_HILL);
+  placeTerrainRect(44, 12, 3, 5, TERRAIN_HILL);
+  // 南通道两侧
+  placeTerrainRect(33, 43, 3, 5, TERRAIN_HILL);
+  placeTerrainRect(44, 43, 3, 5, TERRAIN_HILL);
+  // 西通道两侧
+  placeTerrainRect(12, 23, 5, 3, TERRAIN_HILL);
+  placeTerrainRect(12, 34, 5, 3, TERRAIN_HILL);
+  // 东通道两侧
+  placeTerrainRect(63, 23, 5, 3, TERRAIN_HILL);
+  placeTerrainRect(63, 34, 5, 3, TERRAIN_HILL);
+
+  // ---- 确保四角丧尸出生点区域是干净的草地 ----
+  placeTerrainRect(3, 3, 8, 8, TERRAIN_GRASS);     // NW
+  placeTerrainRect(69, 3, 8, 8, TERRAIN_GRASS);    // NE
+  placeTerrainRect(3, 49, 8, 8, TERRAIN_GRASS);    // SW
+  placeTerrainRect(69, 49, 8, 8, TERRAIN_GRASS);   // SE
+
+  // ---- 6 个固定矿区 ----
+  // 四角矿区（靠近丧尸出生点，采矿有风险）
+  placeMineralRect(8, 8, 3, 2);    // NW
+  placeMineralRect(69, 8, 3, 2);   // NE
+  placeMineralRect(8, 50, 3, 2);   // SW
+  placeMineralRect(69, 50, 3, 2);  // SE
+  // 中央矿区
+  placeMineralRect(28, 29, 2, 2);  // 西侧中央矿
+  // 基地旁安全矿
+  placeMineralRect(46, 30, 2, 2);  // 紧邻玩家基地东侧
+}
+
+// ============================================================
+//  地图注册表
+// ============================================================
+const MAP_REGISTRY = [
+  {
+    id: 'default',
+    name: '默认地图',
+    desc: '标准对战 - 60×40 · 随机岩石 · 经典左上 vs 右下',
+    mapW: 60,
+    mapH: 40,
+    initFn: initDefaultMap,
+  },
+  {
+    id: 'dead_of_night',
+    name: '亡者之夜',
+    desc: '四面围城 - 80×60 · 4 条咽喉通道 · 四角丧尸出生点',
+    mapW: 80,
+    mapH: 60,
+    initFn: initDeadOfNightMap,
+  },
+];
