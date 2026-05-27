@@ -16,6 +16,19 @@ for (let y = 0; y < MAP_H; y++) {
   }
 }
 
+// ---- 战争迷雾 ----
+// 0=未探索(Unexplored), 1=已探索(Explored), 2=可见(Visible)
+const FOG_UNEXPLORED = 0;
+const FOG_EXPLORED = 1;
+const FOG_VISIBLE = 2;
+const fogMap = [];
+for (let y = 0; y < MAP_H; y++) {
+  fogMap[y] = [];
+  for (let x = 0; x < MAP_W; x++) {
+    fogMap[y][x] = FOG_UNEXPLORED;
+  }
+}
+
 // 放置矿区
 function placeMineral(cx, cy, count) {
   for (let i = 0; i < count; i++) {

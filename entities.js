@@ -11,20 +11,22 @@ let nextId = 1;
 const entities = [];
 
 // ---- 单位类型定义 ----
+// vision: 视野半径(格数), 用于战争迷雾
 const UNIT_DEFS = {
-  worker:  { char: '工', hp: 50, speed: 1.5, atk: 5,  range: 1, cost: 50,  popCost: 1, buildTime: 150, color: '#0f0', desc: '农民 - 采矿/建造', radius: 0.4 },
-  soldier: { char: '兵', hp: 80, speed: 1.2, atk: 12, range: 1.5, cost: 75,  popCost: 1, buildTime: 200, color: '#ff0', desc: '步兵 - 近战', radius: 0.4 },
-  tank:    { char: '坦', hp: 200, speed: 0.8, atk: 30, range: 4, cost: 150, popCost: 2, buildTime: 400, color: '#f80', desc: '坦克 - 重火力', radius: 0.6 },
-  ranger:  { char: '弓', hp: 60, speed: 1.0, atk: 15, range: 5, cost: 100, popCost: 1, buildTime: 250, color: '#0ff', desc: '弓手 - 远程', radius: 0.4 },
+  worker:  { char: '工', hp: 50, speed: 1.5, atk: 5,  range: 1, cost: 50,  popCost: 1, buildTime: 150, color: '#0f0', desc: '农民 - 采矿/建造', radius: 0.4, vision: 5 },
+  soldier: { char: '兵', hp: 80, speed: 1.2, atk: 12, range: 1.5, cost: 75,  popCost: 1, buildTime: 200, color: '#ff0', desc: '步兵 - 近战', radius: 0.4, vision: 6 },
+  tank:    { char: '坦', hp: 200, speed: 0.8, atk: 30, range: 4, cost: 150, popCost: 2, buildTime: 400, color: '#f80', desc: '坦克 - 重火力', radius: 0.6, vision: 6 },
+  ranger:  { char: '弓', hp: 60, speed: 1.0, atk: 15, range: 5, cost: 100, popCost: 1, buildTime: 250, color: '#0ff', desc: '弓手 - 远程', radius: 0.4, vision: 8 },
 };
 
 // ---- 建筑类型定义 ----
+// vision: 视野半径(格数), 用于战争迷雾
 const BUILDING_DEFS = {
-  base:     { char: '基', w: 2, h: 2, hp: 1000, color: '#0f0', desc: '主基地 - 生产农民', produces: ['worker'], cost: 0 },
-  barracks: { char: '营', w: 2, h: 2, hp: 500,  color: '#ff0', desc: '兵营 - 生产步兵/弓手', produces: ['soldier', 'ranger'], cost: 150 },
-  factory:  { char: '厂', w: 2, h: 2, hp: 600,  color: '#f80', desc: '工厂 - 生产坦克', produces: ['tank'], cost: 200 },
-  tower:    { char: '塔', w: 1, h: 1, hp: 300,  color: '#f00', desc: '防御塔 - 自动攻击', cost: 100 },
-  supply:   { char: '房', w: 1, h: 1, hp: 200,  color: '#0ff', desc: '人口房 +10人口', cost: 50 },
+  base:     { char: '基', w: 2, h: 2, hp: 1000, color: '#0f0', desc: '主基地 - 生产农民', produces: ['worker'], cost: 0, vision: 8 },
+  barracks: { char: '营', w: 2, h: 2, hp: 500,  color: '#ff0', desc: '兵营 - 生产步兵/弓手', produces: ['soldier', 'ranger'], cost: 150, vision: 6 },
+  factory:  { char: '厂', w: 2, h: 2, hp: 600,  color: '#f80', desc: '工厂 - 生产坦克', produces: ['tank'], cost: 200, vision: 6 },
+  tower:    { char: '塔', w: 1, h: 1, hp: 300,  color: '#f00', desc: '防御塔 - 自动攻击', cost: 100, vision: 8 },
+  supply:   { char: '房', w: 1, h: 1, hp: 200,  color: '#0ff', desc: '人口房 +10人口', cost: 50, vision: 4 },
 };
 
 // ---- 创建单位 ----
