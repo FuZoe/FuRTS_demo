@@ -1357,7 +1357,11 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape') cancelBuild();
 
-  const numKey = parseInt(e.key);
+  // Use e.code for modifier combos since Shift/Alt change e.key (e.g. Shift+3 → '#')
+  let numKey = parseInt(e.key);
+  if (isNaN(numKey) && e.code && e.code.startsWith('Digit')) {
+    numKey = parseInt(e.code.charAt(5));
+  }
   const isNum = numKey >= 1 && numKey <= 9;
 
   // Ctrl+数字: 分配编队
