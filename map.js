@@ -228,15 +228,21 @@ function initDeadOfNightMap() {
   placeTerrainRect(69, 49, 8, 8, TERRAIN_GRASS);   // SE
 
   // ---- 6 个固定矿区 ----
-  // 四角矿区（靠近丧尸出生点，采矿有风险）
-  placeMineralRect(8, 8, 3, 2);    // NW
-  placeMineralRect(69, 8, 3, 2);   // NE
-  placeMineralRect(8, 50, 3, 2);   // SW
-  placeMineralRect(69, 50, 3, 2);  // SE
-  // 中央矿区
-  placeMineralRect(28, 29, 2, 2);  // 西侧中央矿
-  // 基地旁安全矿
-  placeMineralRect(46, 30, 2, 2);  // 紧邻玩家基地东侧
+  // 单格矿储量 ≈ 6.67 trips × 5 minerals = ~33 minerals
+  // 总储量目标 ≈ 2000+，足够开局 + 中期建队 + 拉持久战
+  //
+  // 四角矿区（靠近丧尸出生点，采矿有风险，但储量较多）
+  // 4 × 12 cells × 33 ≈ 1584 minerals
+  placeMineralRect(7, 7, 4, 3);    // NW (12 cells)
+  placeMineralRect(69, 7, 4, 3);   // NE
+  placeMineralRect(7, 50, 4, 3);   // SW
+  placeMineralRect(69, 50, 4, 3);  // SE
+  // 中央矿区（中等风险，位于沙地上，靠近西通道）
+  // 9 cells × 33 ≈ 297 minerals
+  placeMineralRect(27, 28, 3, 3);  // 西侧中央矿
+  // 基地旁安全矿（紧邻基地，位于安全草地内，可持续开采到中期）
+  // 15 cells × 33 ≈ 495 minerals
+  placeMineralRect(41, 30, 5, 3);  // 紧邻玩家基地东侧
 }
 
 // ============================================================
