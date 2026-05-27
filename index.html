@@ -1324,7 +1324,9 @@ function recallControlGroup(num) {
 
 // ---- 子组切换 (Tab) ----
 function cycleSubGroup() {
-  const selEntities = game.selected
+  // Use stored full selection if available (after first Tab), otherwise current selection
+  const sourceIds = game._fullSelection || game.selected;
+  const selEntities = sourceIds
     .map(id => entities.find(e => e.id === id))
     .filter(e => e && e.hp > 0);
   if (selEntities.length === 0) return;
@@ -1333,7 +1335,10 @@ function cycleSubGroup() {
   const types = [...new Set(selEntities.map(e => e.type))];
   if (types.length <= 1) return; // only one type, nothing to cycle
 
-  // Find current sub-group type
+  // Store the full selection on first Tab press
+  if (!game._fullSelection) game._fullSelection = [...game.selected];
+
+  // Find current sub-group type and advance
   const currentType = game._subGroupType || null;
   let nextIdx = 0;
   if (currentType) {
@@ -1342,10 +1347,8 @@ function cycleSubGroup() {
   }
   game._subGroupType = types[nextIdx];
 
-  // Select only units of this type from the original selection
+  // Select only units of this type from the full selection
   const subIds = selEntities.filter(e => e.type === game._subGroupType).map(e => e.id);
-  // Store the full group so we can cycle back
-  if (!game._fullSelection) game._fullSelection = [...game.selected];
   game.selected = subIds;
   addLog(`子组: ${UNIT_DEFS[game._subGroupType]?.desc || game._subGroupType}`);
   updateSidebar();
