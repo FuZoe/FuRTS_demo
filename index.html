@@ -483,6 +483,9 @@ function update() {
   // 单位碰撞分离
   applyUnitSeparation();
 
+  // 战争迷雾更新
+  updateFog();
+
   countPop();
 
   // AI逻辑 (每120帧执行一次)
@@ -490,6 +493,55 @@ function update() {
 
   updateHUD();
 }
+
+// ---- 战争迷雾 ----
+// 每帧重算视野: 先将 VISIBLE 降级为 EXPLORED, 再用所有玩家实体重新点亮
+const game_fogEnabled = true; // 调试可在 console 关闭: window.fogEnabled = false
+window.fogEnabled = game_fogEnabled;
+
+function updateFog() {
+  if (!window.fogEnabled) {
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) fogMap[y][x] = FOG_VISIBLE;
+    }
+    return;
+  }
+  for (let y = 0; y < MAP_H; y++) {
+    const row = fogMap[y];
+    for (let x = 0; x < MAP_W; x++) {
+      if (row[x] === FOG_VISIBLE) row[x] = FOG_EXPLORED;
+    }
+  }
+  for (const e of entities) {
+    if (e.team !== TEAM_PLAYER || e.hp <= 0) continue;
+    let cx, cy, vision;
+    if (e.kind === 'unit') {
+      vision = UNIT_DEFS[e.type].vision || 5;
+      cx = e.x / CELL;
+      cy = e.y / CELL;
+    } else {
+      const bDef = BUILDING_DEFS[e.type];
+      vision = bDef.vision || 4;
+      cx = e.gx + bDef.w / 2;
+      cy = e.gy + bDef.h / 2;
+    }
+    const vSq = vision * vision;
+    const minX = Math.max(0, Math.floor(cx - vision));
+    const maxX = Math.min(MAP_W - 1, Math.ceil(cx + vision));
+    const minY = Math.max(0, Math.floor(cy - vision));
+    const maxY = Math.min(MAP_H - 1, Math.ceil(cy + vision));
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const dx = x + 0.5 - cx;
+        const dy = y + 0.5 - cy;
+        if (dx * dx + dy * dy <= vSq) fogMap[y][x] = FOG_VISIBLE;
+      }
+    }
+  }
+}
+
+// 初始化时立即计算一次视野, 避免开局第一帧前画面全黑
+updateFog();
 
 // ---- 敌方AI ----
 function enemyAI() {
@@ -615,6 +667,26 @@ function render() {
     }
   }
 
+  // 战争迷雾遮罩 (绘制在地形之上, 实体之下)
+  // - UNEXPLORED: 不透明黑色, 完全遮挡地形
+  // - EXPLORED: 半透明黑色, 地形可见但暗淡
+  if (window.fogEnabled) {
+    for (let gy = startGY; gy < endGY; gy++) {
+      for (let gx = startGX; gx < endGX; gx++) {
+        const fog = fogMap[gy]?.[gx];
+        if (fog === FOG_VISIBLE) continue;
+        const fsx = gx * CELL - camera.x;
+        const fsy = gy * CELL - camera.y;
+        if (fog === FOG_UNEXPLORED) {
+          ctx.fillStyle = '#000';
+        } else { // FOG_EXPLORED
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        }
+        ctx.fillRect(fsx, fsy, CELL, CELL);
+      }
+    }
+  }
+
   // 绘制实体
   for (const e of entities) {
     if (e.hp <= 0) continue;
@@ -622,6 +694,20 @@ function render() {
     const sy = e.y - camera.y;
 
     if (sx < -CELL * 3 || sx > canvas.width + CELL * 3 || sy < -CELL * 3 || sy > canvas.height + CELL * 3) continue;
+
+    // 战争迷雾: 敌方实体仅在视野格内才渲染 (建筑取中心格判断)
+    if (e.team === TEAM_ENEMY) {
+      let cgx, cgy;
+      if (e.kind === 'building') {
+        const bDef = BUILDING_DEFS[e.type];
+        cgx = e.gx + Math.floor(bDef.w / 2);
+        cgy = e.gy + Math.floor(bDef.h / 2);
+      } else {
+        cgx = Math.floor(e.x / CELL);
+        cgy = Math.floor(e.y / CELL);
+      }
+      if (fogMap[cgy]?.[cgx] !== FOG_VISIBLE) continue;
+    }
 
     if (e.kind === 'building') {
       const bDef = BUILDING_DEFS[e.type];
@@ -781,11 +867,15 @@ function renderMinimap() {
   const sx = mw / MAP_W;
   const sy = mh / MAP_H;
 
+  // 背景填黑 (未探索区域默认状态)
   mmCtx.fillStyle = '#000';
   mmCtx.fillRect(0, 0, mw, mh);
 
+  // 地形 (只在 EXPLORED / VISIBLE 区域绘制)
   for (let gy = 0; gy < MAP_H; gy++) {
     for (let gx = 0; gx < MAP_W; gx++) {
+      const fog = window.fogEnabled ? fogMap[gy][gx] : FOG_VISIBLE;
+      if (fog === FOG_UNEXPLORED) continue;
       // 地形层
       const terrainType = mapLayers.terrain[gy][gx];
       if (terrainType !== TERRAIN_GRASS) {
@@ -805,8 +895,14 @@ function renderMinimap() {
     }
   }
 
+  // 实体: 玩家实体始终显示, 敌方实体仅在 VISIBLE 格内显示
   for (const e of entities) {
     if (e.hp <= 0) continue;
+    if (e.team === TEAM_ENEMY && window.fogEnabled) {
+      const cgx = Math.floor(e.x / CELL);
+      const cgy = Math.floor(e.y / CELL);
+      if (fogMap[cgy]?.[cgx] !== FOG_VISIBLE) continue;
+    }
     const ex = (e.x / CELL) * sx;
     const ey = (e.y / CELL) * sy;
     if (e.team === TEAM_PLAYER) {
@@ -816,6 +912,18 @@ function renderMinimap() {
     }
     const size = e.kind === 'building' ? 4 : 2;
     mmCtx.fillRect(ex - size / 2, ey - size / 2, size, size);
+  }
+
+  // EXPLORED 区域叠加半透明遮罩 (visual cue 已探索但未点亮)
+  if (window.fogEnabled) {
+    mmCtx.fillStyle = 'rgba(0,0,0,0.45)';
+    for (let gy = 0; gy < MAP_H; gy++) {
+      for (let gx = 0; gx < MAP_W; gx++) {
+        if (fogMap[gy][gx] === FOG_EXPLORED) {
+          mmCtx.fillRect(gx * sx, gy * sy, sx, sy);
+        }
+      }
+    }
   }
 
   const vx = (camera.x / (MAP_W * CELL)) * mw;
