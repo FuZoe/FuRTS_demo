@@ -71,17 +71,28 @@ body {
 .btn:disabled { color: #050; border-color: #030; cursor: not-allowed; }
 .btn .cost { color: #0a0; float: right; }
 .btn .btn-key { color: #ff0; font-weight: bold; margin-right: 2px; }
-#groupBar { display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 4px; }
+#groupBar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; padding-top: 4px; }
 .grp-btn {
   width: 22px; height: 22px;
   background: #020; color: #555;
   border: 1px solid #333; cursor: pointer;
   font: bold 11px 'Courier New', monospace;
   text-align: center; line-height: 20px;
-  padding: 0;
+  padding: 0; position: relative;
 }
-.grp-btn.active { color: #ff0; border-color: #ff0; background: #220; }
+.grp-btn.active { color: #ff0; border-color: #ff0; background: #220; position: relative; }
 .grp-btn.selected { color: #fff; border-color: #fff; background: #030; }
+.grp-btn .grp-count {
+  position: absolute;
+  top: -5px; right: -5px;
+  font-size: 8px; color: #0f0;
+  background: #020; border: 1px solid #0a0;
+  border-radius: 6px; padding: 0 2px;
+  line-height: 12px; min-width: 12px;
+  text-align: center; z-index: 1;
+}
+.grp-btn.flash { animation: grpFlash 0.3s; }
+@keyframes grpFlash { 0%,100%{background:#220;} 50%{background:#0a0;} }
 #info {
   margin-top: 10px;
   padding-top: 6px;
@@ -135,7 +146,7 @@ body {
   <span class="hud-item"><span class="hud-label">单位: </span><span class="hud-value" id="hudUnits">0</span></span>
   <span class="hud-item"><span class="hud-label">敌军: </span><span class="hud-value" id="hudEnemies">0</span></span>
   <span class="hud-item"><span class="hud-label">时间: </span><span class="hud-value" id="hudTime">00:00</span></span>
-  <span class="hud-item" style="margin-left:auto;color:#0a0;font-size:12px;">左键选择/框选 | 右键指令 | Ctrl+数字编队</span>
+  <span class="hud-item" style="margin-left:auto;color:#0a0;font-size:12px;">左键选择/框选 | 右键指令 | Ctrl/Shift/Alt+数字编队</span>
 </div>
 <canvas id="gameCanvas"></canvas>
 <div id="sidebar">
@@ -825,8 +836,13 @@ function updateGuide() {
     html += '<div class="guide-section">';
     html += row('左键', '选中单位/建筑');
     html += row('左键拖拽', '框选多个单位');
-    html += row('Ctrl+数字', '分配编队');
+    html += row('双击单位', '选择屏幕内同类型');
+    html += row('Ctrl+点击', '选择屏幕内同类型');
+    html += row('Ctrl+数字', '设置编队');
+    html += row('Shift+数字', '追加编队');
+    html += row('Alt+数字', '独占编队');
     html += row('数字键', '召回编队');
+    html += row('Tab', '子组切换');
     html += row('WASD', '滚动地图');
     html += row('目标', '摧毁左上敌方基地');
     html += '</div>';
@@ -844,7 +860,10 @@ function updateGuide() {
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
     if (hasWorker) html += row('右键矿石', '采矿');
-    html += row('Ctrl+数字', '分配编队');
+    html += row('Ctrl+数字', '设置编队');
+    html += row('Shift+数字', '追加编队');
+    html += row('Alt+数字', '独占编队');
+    html += row('Tab', '子组切换');
     html += row('左键空地', '取消选中');
   }
 
@@ -863,9 +882,25 @@ function updateGroupBar() {
     const hasUnits = alive.length > 0;
     const isSelected = hasUnits && alive.length === game.selected.length && alive.every(id => game.selected.includes(id));
     const cls = isSelected ? 'grp-btn selected' : (hasUnits ? 'grp-btn active' : 'grp-btn');
-    html += `<button class="${cls}" onclick="recallControlGroup(${i})" title="${hasUnits ? alive.length + '个单位' : '空'}">${i}</button>`;
+    const tip = hasUnits
+      ? `${alive.length}个单位 | 右键:设置 Shift+右键:追加 Alt+右键:独占`
+      : '右键:设置编队';
+    const countTag = hasUnits ? `<span class="grp-count">${alive.length}</span>` : '';
+    html += `<button class="${cls}" onclick="recallControlGroup(${i})" oncontextmenu="handleGroupBarRightClick(event,${i})" title="${tip}">${i}${countTag}</button>`;
   }
   bar.innerHTML = html;
+}
+
+function handleGroupBarRightClick(e, num) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.altKey) {
+    stealControlGroup(num);
+  } else if (e.shiftKey) {
+    appendControlGroup(num);
+  } else {
+    assignControlGroup(num);
+  }
 }
 
 function updateSidebar() {
@@ -1061,7 +1096,33 @@ canvas.addEventListener('mouseup', (e) => {
     if (dx < 5 && dy < 5) {
       const gx = Math.floor((mx + camera.x) / CELL);
       const gy = Math.floor((my + camera.y) / CELL);
-      selectAt(gx, gy, e.shiftKey);
+
+      // Double-click: select all same type on screen
+      const now = Date.now();
+      const isDoubleClick = (now - (game._lastClickTime || 0) < 400) &&
+        Math.abs(mx - (game._lastClickX || 0)) < 10 &&
+        Math.abs(my - (game._lastClickY || 0)) < 10;
+      game._lastClickTime = now;
+      game._lastClickX = mx;
+      game._lastClickY = my;
+
+      if (isDoubleClick) {
+        const target = entityAt(gx, gy);
+        if (target && target.team === TEAM_PLAYER && target.kind === 'unit') {
+          if (!e.shiftKey) game.selected = [];
+          for (const ent of entities) {
+            if (ent.hp <= 0 || ent.team !== TEAM_PLAYER || ent.kind !== 'unit') continue;
+            if (ent.type !== target.type) continue;
+            const sx = ent.x - camera.x;
+            const sy = ent.y - camera.y;
+            if (sx >= -CELL && sx <= canvas.width + CELL && sy >= -CELL && sy <= canvas.height + CELL) {
+              if (!game.selected.includes(ent.id)) game.selected.push(ent.id);
+            }
+          }
+        }
+      } else {
+        selectAt(gx, gy, e.shiftKey, e.ctrlKey);
+      }
     } else {
       boxSelect(game.dragStart, { x: mx, y: my }, e.shiftKey);
     }
@@ -1073,14 +1134,35 @@ canvas.addEventListener('mouseup', (e) => {
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-function selectAt(gx, gy, additive) {
+function selectAt(gx, gy, additive, ctrlKey) {
   const target = entityAt(gx, gy);
+
+  // Ctrl+click: select all same-type units on screen
+  if (ctrlKey && target && target.team === TEAM_PLAYER && target.kind === 'unit') {
+    if (!additive) game.selected = [];
+    for (const e of entities) {
+      if (e.hp <= 0 || e.team !== TEAM_PLAYER || e.kind !== 'unit') continue;
+      if (e.type !== target.type) continue;
+      // Check if on screen
+      const sx = e.x - camera.x;
+      const sy = e.y - camera.y;
+      if (sx >= -CELL && sx <= canvas.width + CELL && sy >= -CELL && sy <= canvas.height + CELL) {
+        if (!game.selected.includes(e.id)) game.selected.push(e.id);
+      }
+    }
+    return;
+  }
+
   if (!additive) game.selected = [];
   if (target && target.team === TEAM_PLAYER) {
     if (!game.selected.includes(target.id)) {
       game.selected.push(target.id);
     }
   }
+
+  // Reset sub-group state on new selection
+  game._subGroupType = null;
+  game._fullSelection = null;
 }
 
 function boxSelect(start, end, additive) {
@@ -1185,17 +1267,51 @@ function assignControlGroup(num) {
   game.controlGroups[num] = [...game.selected];
   addLog(`编队 ${num}: ${game.selected.length} 个单位`);
   updateSidebar();
+  flashGroupButton(num);
+}
+
+function appendControlGroup(num) {
+  if (game.selected.length === 0) return;
+  if (!game.controlGroups[num]) game.controlGroups[num] = [];
+  for (const id of game.selected) {
+    if (!game.controlGroups[num].includes(id)) {
+      game.controlGroups[num].push(id);
+    }
+  }
+  addLog(`追加编队 ${num}: +${game.selected.length}`);
+  updateSidebar();
+  flashGroupButton(num);
+}
+
+function stealControlGroup(num) {
+  if (game.selected.length === 0) return;
+  // Remove selected units from all other groups
+  for (let i = 1; i <= 9; i++) {
+    if (i === num || !game.controlGroups[i]) continue;
+    game.controlGroups[i] = game.controlGroups[i].filter(id => !game.selected.includes(id));
+  }
+  game.controlGroups[num] = [...game.selected];
+  addLog(`独占编队 ${num}: ${game.selected.length} 个单位`);
+  updateSidebar();
+  flashGroupButton(num);
+}
+
+function flashGroupButton(num) {
+  const btn = document.querySelector(`#groupBar button:nth-child(${num})`);
+  if (btn) {
+    btn.classList.remove('flash');
+    void btn.offsetWidth;
+    btn.classList.add('flash');
+  }
 }
 
 function recallControlGroup(num) {
   const ids = game.controlGroups[num];
   if (!ids || ids.length === 0) return false;
-  // 过滤已死亡的实体
   const alive = ids.filter(id => entities.find(e => e.id === id && e.hp > 0));
   game.controlGroups[num] = alive;
   if (alive.length === 0) return false;
   game.selected = [...alive];
-  // 将镜头移到编队中心
   const units = alive.map(id => entities.find(e => e.id === id)).filter(Boolean);
   const cx = units.reduce((s, u) => s + u.x, 0) / units.length;
   const cy = units.reduce((s, u) => s + u.y, 0) / units.length;
@@ -1206,13 +1322,49 @@ function recallControlGroup(num) {
   return true;
 }
 
+// ---- 子组切换 (Tab) ----
+function cycleSubGroup() {
+  // Use stored full selection if available (after first Tab), otherwise current selection
+  const sourceIds = game._fullSelection || game.selected;
+  const selEntities = sourceIds
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.hp > 0);
+  if (selEntities.length === 0) return;
+
+  // Group by type
+  const types = [...new Set(selEntities.map(e => e.type))];
+  if (types.length <= 1) return; // only one type, nothing to cycle
+
+  // Store the full selection on first Tab press
+  if (!game._fullSelection) game._fullSelection = [...game.selected];
+
+  // Find current sub-group type and advance
+  const currentType = game._subGroupType || null;
+  let nextIdx = 0;
+  if (currentType) {
+    const curIdx = types.indexOf(currentType);
+    nextIdx = (curIdx + 1) % types.length;
+  }
+  game._subGroupType = types[nextIdx];
+
+  // Select only units of this type from the full selection
+  const subIds = selEntities.filter(e => e.type === game._subGroupType).map(e => e.id);
+  game.selected = subIds;
+  addLog(`子组: ${UNIT_DEFS[game._subGroupType]?.desc || game._subGroupType}`);
+  updateSidebar();
+}
+
 // 键盘
 window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
 
   if (e.key === 'Escape') cancelBuild();
 
-  const numKey = parseInt(e.key);
+  // Use e.code for modifier combos since Shift/Alt change e.key (e.g. Shift+3 → '#')
+  let numKey = parseInt(e.key);
+  if (isNaN(numKey) && e.code && e.code.startsWith('Digit')) {
+    numKey = parseInt(e.code.charAt(5));
+  }
   const isNum = numKey >= 1 && numKey <= 9;
 
   // Ctrl+数字: 分配编队
@@ -1222,8 +1374,29 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Shift+数字: 追加到编队
+  if (isNum && e.shiftKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    appendControlGroup(numKey);
+    return;
+  }
+
+  // Alt+数字: 独占编队（steal）
+  if (isNum && e.altKey && !e.ctrlKey) {
+    e.preventDefault();
+    stealControlGroup(numKey);
+    return;
+  }
+
+  // Tab: 子组切换
+  if (e.key === 'Tab' && game.selected.length > 0) {
+    e.preventDefault();
+    cycleSubGroup();
+    return;
+  }
+
   // 数字键: 先尝试原有快捷键，无效则召回编队
-  if (isNum && !e.ctrlKey) {
+  if (isNum && !e.ctrlKey && !e.shiftKey && !e.altKey) {
     const sel = game.selected.map(id => entities.find(en => en.id === id)).filter(Boolean);
     const selBuilding = sel.find(s => s.kind === 'building' && s.team === TEAM_PLAYER);
     const hasWorker = sel.some(s => s.type === 'worker' && s.team === TEAM_PLAYER);
