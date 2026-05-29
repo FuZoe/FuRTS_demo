@@ -502,7 +502,7 @@ function update() {
             e.carrying = 0;
             e.gatherTimer = 0;
             e.path = [];
-            const mineral = findNearestMineral(e.gx, e.gy);
+            const mineral = findLeastLoadedMineral(e.gx, e.gy);
             if (mineral) {
               e.gatherTarget = mineral;
               setUnitPath(e, mineral.gx, mineral.gy);
@@ -1590,12 +1590,11 @@ function issueCommand(mx, my) {
   }
 
   if (mapLayers.resource[gy]?.[gx] === 1) {
-    for (const u of selectedUnits) {
-      if (u.type === 'worker') {
-        u.state = 'gather';
-        u.gatherTarget = { gx, gy };
-        u.gatherTimer = 0;
-        setUnitPath(u, gx, gy);
+    const workers = selectedUnits.filter(u => u.type === 'worker');
+    if (workers.length > 0) {
+      const mineralCells = findMineralPatchCells(gx, gy);
+      if (mineralCells.length > 0) {
+        distributeWorkersToMinerals(workers, mineralCells);
       }
     }
     addLog('⛏️ 前往采矿');
