@@ -415,7 +415,8 @@ function update() {
         if (e.queueTimer >= def.buildTime) {
           const spawnX = e.gx + (e.team === TEAM_PLAYER ? -2 : 3);
           const spawnY = e.gy + 1;
-          createUnit(producing, spawnX, spawnY, e.team);
+          const newUnit = createUnit(producing, spawnX, spawnY, e.team);
+          applyRallyPoint(e, newUnit);
           e.queue.shift();
           e.queueTimer = 0;
           if (e.team === TEAM_PLAYER) addLog(`生产完成: ${def.desc}`);
@@ -965,6 +966,51 @@ function render() {
     }
   }
 
+  // 选中建筑高亮 + 集结点标记
+  for (const id of game.selected) {
+    const e = entities.find(en => en.id === id);
+    if (!e || e.kind !== 'building' || e.team !== TEAM_PLAYER) continue;
+    const bDef = BUILDING_DEFS[e.type];
+    const bx = e.gx * CELL - camera.x;
+    const by = e.gy * CELL - camera.y;
+    const bw = bDef.w * CELL;
+    const bh = bDef.h * CELL;
+
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx - 2, by - 2, bw + 4, bh + 4);
+    ctx.lineWidth = 1;
+
+    if (e.rallyPoint) {
+      const rp = e.rallyPoint;
+      const cx = bx + bw / 2;
+      const cy = by + bh / 2;
+      const rx = rp.gx * CELL + CELL / 2 - camera.x;
+      const ry = rp.gy * CELL + CELL / 2 - camera.y;
+      const isMineral = rp.type === 'mineral';
+      const color = isMineral ? '#0af' : '#ff0';
+
+      ctx.strokeStyle = color;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(rx, ry);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#000';
+      ctx.font = `bold 12px Courier New`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(isMineral ? '⛏' : '⚑', rx, ry + 1);
+    }
+  }
+
   // 框选框
   if (game.dragStart && game.dragEnd) {
     ctx.strokeStyle = '#0f0';
@@ -1235,6 +1281,15 @@ function updateSidebar() {
     if (first.queue.length > 0) {
       html += `<br>生产中: ${UNIT_DEFS[first.queue[0]].char} (${first.queue.length}个排队)`;
     }
+    if (first.team === TEAM_PLAYER && bDef.produces) {
+      if (first.rallyPoint) {
+        const rp = first.rallyPoint;
+        const tag = rp.type === 'mineral' ? '矿区 ⛏️' : '已设置 🚩';
+        html += `<br>集结点: ${tag} (${rp.gx},${rp.gy})`;
+      } else {
+        html += `<br>集结点: 无（右键设置）`;
+      }
+    }
     infoEl.innerHTML = html;
 
     let btns = '';
@@ -1474,11 +1529,46 @@ function boxSelect(start, end, additive) {
   }
 }
 
+// 把建筑当前的集结点指令应用到新生产的单位上
+function applyRallyPoint(building, unit) {
+  if (!building.rallyPoint || !unit) return;
+  const rp = building.rallyPoint;
+  if (rp.type === 'mineral' && unit.type === 'worker') {
+    unit.state = 'gather';
+    unit.gatherTarget = { gx: rp.gx, gy: rp.gy };
+    unit.gatherTimer = 0;
+    setUnitPath(unit, rp.gx, rp.gy);
+  } else {
+    unit.state = 'move';
+    unit.target = {
+      x: rp.gx * CELL + CELL / 2,
+      y: rp.gy * CELL + CELL / 2,
+    };
+    setUnitPath(unit, rp.gx, rp.gy);
+  }
+}
+
 function issueCommand(mx, my) {
   if (game.selected.length === 0) return;
 
   const gx = Math.floor((mx + camera.x) / CELL);
   const gy = Math.floor((my + camera.y) / CELL);
+
+  // 选中己方已建造完成的建筑时，右键设置集结点
+  const selectedBuildings = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.kind === 'building' && e.team === TEAM_PLAYER && e.buildProgress >= e.maxHp);
+
+  if (selectedBuildings.length > 0) {
+    const isMineral = mapLayers.resource[gy]?.[gx] === 1;
+    const rpType = isMineral ? 'mineral' : 'move';
+    for (const b of selectedBuildings) {
+      b.rallyPoint = { gx, gy, type: rpType };
+    }
+    addLog(isMineral ? '集结点设为矿区 ⛏️' : '集结点已设置 🚩');
+    updateSidebar();
+    return;
+  }
 
   const selectedUnits = game.selected
     .map(id => entities.find(e => e.id === id))
