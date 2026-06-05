@@ -1011,10 +1011,12 @@ function render() {
     }
   }
 
-  // 排队路径线渲染
-  for (const id of game.selected) {
-    const unit = entities.find(en => en.id === id);
-    if (!unit || unit.kind !== 'unit' || unit.actionQueue.length === 0) continue;
+  // 排队路径线渲染（仅渲染第一个有队列的选中单位，避免多单位阵型偏移产生多个黄点）
+  const queueUnit = game.selected
+    .map(id => entities.find(en => en.id === id))
+    .find(u => u && u.kind === 'unit' && u.actionQueue.length > 0);
+  if (queueUnit) {
+    const unit = queueUnit;
 
     let prevX = unit.x - camera.x;
     let prevY = unit.y - camera.y;
