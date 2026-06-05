@@ -440,18 +440,18 @@ function update() {
 
     switch (e.state) {
       case 'move': {
-        if (!e.target) { e.state = 'idle'; break; }
+        if (!e.target) { transitionToIdle(e); break; }
         if (e.path.length > 0) {
           const arrived = followPath(e, speed);
           if (arrived) {
-            e.state = 'idle';
             e.target = null;
+            transitionToIdle(e);
           }
         } else {
           const arrived = moveToward(e, e.target.x, e.target.y, speed);
           if (arrived) {
-            e.state = 'idle';
             e.target = null;
+            transitionToIdle(e);
           }
         }
         break;
@@ -459,9 +459,9 @@ function update() {
       case 'attack': {
         const target = entities.find(t => t.id === e.attackTarget);
         if (!target || target.hp <= 0) {
-          e.state = 'idle';
           e.attackTarget = null;
           e.path = [];
+          transitionToIdle(e);
           break;
         }
         const d = dist(e, target);
@@ -484,8 +484,8 @@ function update() {
             target.hp -= def.atk;
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
-              e.state = 'idle';
               e.attackTarget = null;
+              transitionToIdle(e);
               checkGameOver();
             }
           }
@@ -495,7 +495,7 @@ function update() {
       case 'gather': {
         if (e.carrying >= GATHER_AMOUNT) {
           const base = findNearestBase(e.gx, e.gy, e.team);
-          if (!base) { e.state = 'idle'; break; }
+          if (!base) { transitionToIdle(e); break; }
           const d = dist(e, base);
           if (d < CELL * 3) {
             if (e.team === TEAM_PLAYER) game.minerals += e.carrying;
@@ -507,7 +507,7 @@ function update() {
               e.gatherTarget = mineral;
               setUnitPath(e, mineral.gx, mineral.gy);
             } else {
-              e.state = 'idle';
+              transitionToIdle(e);
             }
           } else {
             if (e.path.length > 0) {
@@ -543,14 +543,14 @@ function update() {
             }
           }
         } else {
-          e.state = 'idle';
+          transitionToIdle(e);
         }
         break;
       }
       case 'build': {
-        if (!e.buildTarget) { e.state = 'idle'; break; }
+        if (!e.buildTarget) { transitionToIdle(e); break; }
         const building = entities.find(b => b.id === e.buildTarget);
-        if (!building || building.hp <= 0) { e.state = 'idle'; e.path = []; break; }
+        if (!building || building.hp <= 0) { e.path = []; transitionToIdle(e); break; }
         const d = dist(e, building);
         if (d > CELL * 3) {
           if (e.path.length > 0) {
@@ -566,8 +566,8 @@ function update() {
           building.buildProgress = Math.min(building.maxHp, building.buildProgress + 2);
           if (building.buildProgress >= building.maxHp) {
             addLog(`建筑完成: ${BUILDING_DEFS[building.type].desc}`);
-            e.state = 'idle';
             e.buildTarget = null;
+            transitionToIdle(e);
           }
         }
         break;
@@ -1011,6 +1011,73 @@ function render() {
     }
   }
 
+  // 排队路径线渲染
+  for (const id of game.selected) {
+    const unit = entities.find(en => en.id === id);
+    if (!unit || unit.kind !== 'unit' || unit.actionQueue.length === 0) continue;
+
+    let prevX = unit.x - camera.x;
+    let prevY = unit.y - camera.y;
+
+    // 当前任务的目标点作为起始
+    if (unit.target) {
+      prevX = unit.target.x - camera.x;
+      prevY = unit.target.y - camera.y;
+    } else if (unit.state === 'attack' && unit.attackTarget) {
+      const at = entities.find(t => t.id === unit.attackTarget);
+      if (at) { prevX = at.x - camera.x; prevY = at.y - camera.y; }
+    } else if (unit.state === 'gather' && unit.gatherTarget) {
+      prevX = unit.gatherTarget.gx * CELL + CELL / 2 - camera.x;
+      prevY = unit.gatherTarget.gy * CELL + CELL / 2 - camera.y;
+    } else if (unit.state === 'build' && unit.buildTarget) {
+      const bt = entities.find(b => b.id === unit.buildTarget);
+      if (bt) { prevX = bt.x - camera.x; prevY = bt.y - camera.y; }
+    }
+
+    ctx.strokeStyle = '#ff0';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+
+    for (const cmd of unit.actionQueue) {
+      let nx, ny;
+      if (cmd.type === 'move') {
+        nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
+        ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
+      } else if (cmd.type === 'attack') {
+        const at = entities.find(t => t.id === cmd.targetId);
+        if (!at) continue;
+        nx = at.x - camera.x;
+        ny = at.y - camera.y;
+      } else if (cmd.type === 'gather') {
+        nx = cmd.gatherTarget.gx * CELL + CELL / 2 - camera.x;
+        ny = cmd.gatherTarget.gy * CELL + CELL / 2 - camera.y;
+      } else if (cmd.type === 'build') {
+        const bt = entities.find(b => b.id === cmd.buildTargetId);
+        if (!bt) continue;
+        nx = bt.x - camera.x;
+        ny = bt.y - camera.y;
+      } else {
+        continue;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(prevX, prevY);
+      ctx.lineTo(nx, ny);
+      ctx.stroke();
+
+      // 路径点标记
+      ctx.fillStyle = '#ff0';
+      ctx.beginPath();
+      ctx.arc(nx, ny, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      prevX = nx;
+      prevY = ny;
+    }
+
+    ctx.setLineDash([]);
+  }
+
   // 框选框
   if (game.dragStart && game.dragEnd) {
     ctx.strokeStyle = '#0f0';
@@ -1414,7 +1481,7 @@ canvas.addEventListener('mousedown', (e) => {
       cancelBuild();
       return;
     }
-    issueCommand(mx, my);
+    issueCommand(mx, my, e.shiftKey);
   }
 });
 
@@ -1548,7 +1615,59 @@ function applyRallyPoint(building, unit) {
   }
 }
 
-function issueCommand(mx, my) {
+// ---- 指令排队系统 ----
+function applyCommand(unit, command) {
+  switch (command.type) {
+    case 'move':
+      unit.state = 'move';
+      unit.target = {
+        x: command.targetGrid.gx * CELL + CELL / 2,
+        y: command.targetGrid.gy * CELL + CELL / 2,
+      };
+      unit.attackTarget = null;
+      unit.gatherTarget = null;
+      setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
+      break;
+    case 'attack': {
+      const target = entities.find(t => t.id === command.targetId);
+      if (!target || target.hp <= 0) break;
+      unit.state = 'attack';
+      unit.attackTarget = command.targetId;
+      unit.path = [];
+      unit.pathRetryFrame = 0;
+      break;
+    }
+    case 'gather':
+      if (unit.type !== 'worker') break;
+      unit.state = 'gather';
+      unit.gatherTarget = command.gatherTarget;
+      unit.gatherTimer = 0;
+      setUnitPath(unit, command.gatherTarget.gx, command.gatherTarget.gy);
+      break;
+    case 'build': {
+      if (unit.type !== 'worker') break;
+      const building = entities.find(b => b.id === command.buildTargetId);
+      if (!building || building.hp <= 0) break;
+      unit.state = 'build';
+      unit.buildTarget = command.buildTargetId;
+      const bgx = Math.floor(building.x / CELL);
+      const bgy = Math.floor(building.y / CELL);
+      setUnitPath(unit, bgx, bgy);
+      break;
+    }
+  }
+}
+
+function transitionToIdle(unit) {
+  if (unit.actionQueue.length > 0) {
+    const nextCommand = unit.actionQueue.shift();
+    applyCommand(unit, nextCommand);
+  } else {
+    unit.state = 'idle';
+  }
+}
+
+function issueCommand(mx, my, isShiftHeld = false) {
   if (game.selected.length === 0) return;
 
   const gx = Math.floor((mx + camera.x) / CELL);
@@ -1578,59 +1697,40 @@ function issueCommand(mx, my) {
 
   const target = entityAt(gx, gy);
 
+  // 构建指令对象
+  let command = null;
+
   if (target && target.team === TEAM_ENEMY) {
-    for (const u of selectedUnits) {
-      u.state = 'attack';
-      u.attackTarget = target.id;
-      u.path = [];
-      u.pathRetryFrame = 0;
-    }
-    addLog(`⚔️ 命令攻击!`);
-    return;
-  }
-
-  if (mapLayers.resource[gy]?.[gx] === 1) {
-    for (const u of selectedUnits) {
-      if (u.type === 'worker') {
-        u.state = 'gather';
-        u.gatherTarget = { gx, gy };
-        u.gatherTimer = 0;
-        setUnitPath(u, gx, gy);
-      }
-    }
-    addLog('⛏️ 前往采矿');
-    return;
-  }
-
-  if (target && target.kind === 'building' && target.team === TEAM_PLAYER && target.buildProgress < target.maxHp) {
-    for (const u of selectedUnits) {
-      if (u.type === 'worker') {
-        u.state = 'build';
-        u.buildTarget = target.id;
-        const bgx = Math.floor(target.x / CELL);
-        const bgy = Math.floor(target.y / CELL);
-        setUnitPath(u, bgx, bgy);
-      }
-    }
-    addLog('🔨 前往建造');
-    return;
+    command = { type: 'attack', targetId: target.id };
+    addLog(isShiftHeld ? '⚔️ 排队攻击!' : '⚔️ 命令攻击!');
+  } else if (mapLayers.resource[gy]?.[gx] === 1) {
+    command = { type: 'gather', gatherTarget: { gx, gy } };
+    addLog(isShiftHeld ? '⛏️ 排队采矿' : '⛏️ 前往采矿');
+  } else if (target && target.kind === 'building' && target.team === TEAM_PLAYER && target.buildProgress < target.maxHp) {
+    command = { type: 'build', buildTargetId: target.id };
+    addLog(isShiftHeld ? '🔨 排队建造' : '🔨 前往建造');
+  } else {
+    command = { type: 'move', targetGrid: { gx, gy } };
   }
 
   const count = selectedUnits.length;
   const cols = Math.ceil(Math.sqrt(count));
+
   selectedUnits.forEach((u, i) => {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    const tgx = gx + col;
-    const tgy = gy + row;
-    u.state = 'move';
-    u.target = {
-      x: tgx * CELL + CELL / 2,
-      y: tgy * CELL + CELL / 2,
-    };
-    setUnitPath(u, tgx, tgy);
-    u.attackTarget = null;
-    u.gatherTarget = null;
+    // 对移动指令，计算阵型偏移
+    let cmd = command;
+    if (command.type === 'move') {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+    }
+
+    if (isShiftHeld) {
+      u.actionQueue.push(cmd);
+    } else {
+      u.actionQueue = [];
+      applyCommand(u, cmd);
+    }
   });
 }
 
