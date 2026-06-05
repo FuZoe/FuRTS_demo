@@ -1626,6 +1626,7 @@ function applyCommand(unit, command) {
       };
       unit.attackTarget = null;
       unit.gatherTarget = null;
+      unit.buildTarget = null;
       setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
       break;
     case 'attack': {
@@ -1633,6 +1634,9 @@ function applyCommand(unit, command) {
       if (!target || target.hp <= 0) break;
       unit.state = 'attack';
       unit.attackTarget = command.targetId;
+      unit.target = null;
+      unit.gatherTarget = null;
+      unit.buildTarget = null;
       unit.path = [];
       unit.pathRetryFrame = 0;
       break;
@@ -1641,6 +1645,9 @@ function applyCommand(unit, command) {
       if (unit.type !== 'worker') break;
       unit.state = 'gather';
       unit.gatherTarget = command.gatherTarget;
+      unit.target = null;
+      unit.attackTarget = null;
+      unit.buildTarget = null;
       unit.gatherTimer = 0;
       setUnitPath(unit, command.gatherTarget.gx, command.gatherTarget.gy);
       break;
@@ -1650,6 +1657,9 @@ function applyCommand(unit, command) {
       if (!building || building.hp <= 0) break;
       unit.state = 'build';
       unit.buildTarget = command.buildTargetId;
+      unit.target = null;
+      unit.attackTarget = null;
+      unit.gatherTarget = null;
       const bgx = Math.floor(building.x / CELL);
       const bgy = Math.floor(building.y / CELL);
       setUnitPath(unit, bgx, bgy);
@@ -1727,6 +1737,9 @@ function issueCommand(mx, my, isShiftHeld = false) {
 
     if (isShiftHeld) {
       u.actionQueue.push(cmd);
+      if (u.state === 'idle') {
+        transitionToIdle(u);
+      }
     } else {
       u.actionQueue = [];
       applyCommand(u, cmd);
