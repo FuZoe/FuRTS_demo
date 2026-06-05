@@ -1547,7 +1547,11 @@ canvas.addEventListener('mouseup', (e) => {
   }
 });
 
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+// 禁用整个页面的浏览器右键菜单（游戏中右键用于下达指令）
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  return false;
+}, { capture: true });
 
 function selectAt(gx, gy, additive, ctrlKey) {
   const target = entityAt(gx, gy);
