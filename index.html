@@ -492,6 +492,18 @@ function update() {
         }
         break;
       }
+      case 'hold': {
+        const nearby = findNearestEnemy(e, def.range);
+        if (nearby && dist(e, nearby) <= def.range * CELL && game.frame % 20 === 0) {
+          nearby.hp -= def.atk;
+          if (nearby.hp <= 0) {
+            const targetDef = nearby.kind === 'building' ? BUILDING_DEFS[nearby.type] : UNIT_DEFS[nearby.type];
+            addLog(`${def.char} 消灭了 ${targetDef?.char || '敌人'}`);
+            checkGameOver();
+          }
+        }
+        break;
+      }
       case 'gather': {
         if (e.carrying >= GATHER_AMOUNT) {
           const base = findNearestBase(e.gx, e.gy, e.team);
@@ -962,6 +974,10 @@ function render() {
         ctx.fillStyle = '#f00';
         ctx.font = '9px Courier New';
         ctx.fillText('⚔', sx + 10, sy + 10);
+      } else if (e.state === 'hold') {
+        ctx.fillStyle = '#0ff';
+        ctx.font = '9px Courier New';
+        ctx.fillText('🛡', sx + 10, sy + 10);
       } else if (e.state === 'build') {
         ctx.fillStyle = '#ff0';
         ctx.font = '9px Courier New';
@@ -1268,6 +1284,7 @@ function updateGuide() {
     const hasWorker = sel.some(e => e.type === 'worker');
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
+    html += row('H', '驻守');
     if (hasWorker) html += row('右键矿石', '采矿');
     html += row('Ctrl+数字', '设置编队');
     html += row('Shift+数字', '追加编队');
@@ -1912,6 +1929,29 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Tab' && game.selected.length > 0) {
     e.preventDefault();
     cycleSubGroup();
+    return;
+  }
+
+  if (e.key.toLowerCase() === 'h' && game.selected.length > 0) {
+    e.preventDefault();
+    let heldCount = 0;
+    for (const id of game.selected) {
+      const unit = entities.find(en => en.id === id);
+      if (!unit || unit.kind !== 'unit' || unit.team !== TEAM_PLAYER) continue;
+      unit.state = 'hold';
+      unit.actionQueue = [];
+      unit.path = [];
+      unit.target = null;
+      unit.attackTarget = null;
+      unit.gatherTarget = null;
+      unit.buildTarget = null;
+      unit.pathRetryFrame = 0;
+      heldCount++;
+    }
+    if (heldCount > 0) {
+      addLog('🛡 驻守');
+      updateSidebar();
+    }
     return;
   }
 
