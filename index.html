@@ -299,6 +299,8 @@ const game = {
   dragEnd: null,
   buildMode: null,
   buildPreview: null,
+  attackMoveMode: false,
+  attackMoveQueued: false,
   paused: false,
   gameOver: false,
   scrollSpeed: 8,
@@ -456,12 +458,45 @@ function update() {
         }
         break;
       }
+      case 'attackMove': {
+        const nearby = findNearestEnemy(e, def.range + 2);
+        if (nearby) {
+          e.attackTarget = nearby.id;
+          e._attackMoveTarget = e.target;
+          e.state = 'attack';
+          e.path = [];
+          e.pathRetryFrame = 0;
+          break;
+        }
+        if (!e.target) { transitionToIdle(e); break; }
+        if (e.path.length > 0) {
+          const arrived = followPath(e, speed);
+          if (arrived) {
+            e.target = null;
+            transitionToIdle(e);
+          }
+        } else {
+          const arrived = moveToward(e, e.target.x, e.target.y, speed);
+          if (arrived) {
+            e.target = null;
+            transitionToIdle(e);
+          }
+        }
+        break;
+      }
       case 'attack': {
         const target = entities.find(t => t.id === e.attackTarget);
         if (!target || target.hp <= 0) {
           e.attackTarget = null;
           e.path = [];
-          transitionToIdle(e);
+          if (e._attackMoveTarget) {
+            e.target = e._attackMoveTarget;
+            e._attackMoveTarget = null;
+            e.state = 'attackMove';
+            setUnitPath(e, Math.floor(e.target.x / CELL), Math.floor(e.target.y / CELL));
+          } else {
+            transitionToIdle(e);
+          }
           break;
         }
         const d = dist(e, target);
@@ -485,7 +520,14 @@ function update() {
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
-              transitionToIdle(e);
+              if (e._attackMoveTarget) {
+                e.target = e._attackMoveTarget;
+                e._attackMoveTarget = null;
+                e.state = 'attackMove';
+                setUnitPath(e, Math.floor(e.target.x / CELL), Math.floor(e.target.y / CELL));
+              } else {
+                transitionToIdle(e);
+              }
               checkGameOver();
             }
           }
@@ -1021,10 +1063,13 @@ function render() {
   {
     const selectedWithQueue = game.selected
       .map(id => entities.find(en => en.id === id))
-      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || (u.state === 'move' && u.target)));
+      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || ((u.state === 'move' || u.state === 'attackMove') && u.target)));
 
     if (selectedWithQueue.length > 0) {
-      ctx.strokeStyle = '#ff0';
+      const hasAttackMove = selectedWithQueue.some(u =>
+        (u.state === 'attackMove' && u.target) || u.actionQueue.some(cmd => cmd.type === 'attackMove')
+      );
+      ctx.strokeStyle = hasAttackMove ? '#f44' : '#ff0';
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
 
@@ -1035,13 +1080,13 @@ function render() {
       const waypoints = [];
 
       // 将当前正在执行的目标也加入路标（避免已出队的第一个路标"消失"导致视觉跳跃）
-      if (leader.state === 'move' && leader.target) {
+      if ((leader.state === 'move' || leader.state === 'attackMove') && leader.target) {
         waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y });
       }
 
       for (const cmd of leader.actionQueue) {
         let nx, ny;
-        if (cmd.type === 'move') {
+        if (cmd.type === 'move' || cmd.type === 'attackMove') {
           nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
           ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
         } else if (cmd.type === 'attack') {
@@ -1074,7 +1119,7 @@ function render() {
         }
       }
       // 黄点画在每个路标位置（复用waypoints数组）
-      ctx.fillStyle = '#ff0';
+      ctx.fillStyle = hasAttackMove ? '#f44' : '#ff0';
       for (const wp of waypoints) {
         ctx.beginPath();
         ctx.arc(wp.x, wp.y, 4, 0, Math.PI * 2);
@@ -1230,6 +1275,15 @@ function updateGuide() {
   const row = (k, v) => `<div class="guide-row"><span class="guide-key">${k}</span><span class="guide-desc">${v}</span></div>`;
   let html = '';
 
+  if (game.attackMoveMode) {
+    html += '<div class="guide-section">';
+    html += row('左键', game.attackMoveQueued ? '排队攻击移动' : '攻击移动');
+    html += row('右键/Esc', '取消攻击移动');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
   if (game.buildMode) {
     html += '<div class="guide-section">';
     html += row('左键', '放置建筑');
@@ -1268,6 +1322,8 @@ function updateGuide() {
     const hasWorker = sel.some(e => e.type === 'worker');
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
+    html += row('A', '攻击移动');
+    html += row('Shift+A', '排队攻击移动');
     if (hasWorker) html += row('右键矿石', '采矿');
     html += row('Ctrl+数字', '设置编队');
     html += row('Shift+数字', '追加编队');
@@ -1438,6 +1494,45 @@ function cancelBuild() {
   updateSidebar();
 }
 
+function setAttackMoveMode(enabled, queued = false) {
+  game.attackMoveMode = enabled;
+  game.attackMoveQueued = enabled && queued;
+  canvas.style.cursor = enabled ? 'crosshair' : '';
+  updateSidebar();
+}
+
+function issueAttackMoveCommand(mx, my, isShiftHeld = false) {
+  if (game.selected.length === 0) return;
+  const gx = Math.floor((mx + camera.x) / CELL);
+  const gy = Math.floor((my + camera.y) / CELL);
+  const selectedUnits = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.kind === 'unit' && e.team === TEAM_PLAYER);
+  if (selectedUnits.length === 0) return;
+
+  const count = selectedUnits.length;
+  const cols = Math.ceil(Math.sqrt(count));
+
+  selectedUnits.forEach((u, i) => {
+    let command = { type: 'attackMove', targetGrid: { gx, gy } };
+    if (!isShiftHeld) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      command = { type: 'attackMove', targetGrid: { gx: gx + col, gy: gy + row } };
+    }
+
+    if (isShiftHeld) {
+      u.actionQueue.push(command);
+      if (u.state === 'idle') transitionToIdle(u);
+    } else {
+      u.actionQueue = [];
+      applyCommand(u, command);
+    }
+  });
+
+  addLog(isShiftHeld ? '⚔️ 排队攻击移动' : '⚔️ 攻击移动');
+}
+
 function placeBuildingAtMouse(gx, gy) {
   if (!game.buildMode) return;
   if (!canPlaceBuilding(game.buildMode, gx, gy)) {
@@ -1475,11 +1570,20 @@ canvas.addEventListener('mousedown', (e) => {
       placeBuildingAtMouse(gx, gy);
       return;
     }
+    if (game.attackMoveMode) {
+      issueAttackMoveCommand(mx, my, game.attackMoveQueued || e.shiftKey);
+      setAttackMoveMode(false);
+      return;
+    }
     game.dragStart = { x: mx, y: my };
     game.dragEnd = null;
   }
   if (e.button === 2) {
     e.preventDefault();
+    if (game.attackMoveMode) {
+      setAttackMoveMode(false);
+      return;
+    }
     if (game.buildMode) {
       cancelBuild();
       return;
@@ -1632,6 +1736,19 @@ function applyCommand(unit, command) {
         y: command.targetGrid.gy * CELL + CELL / 2,
       };
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
+      unit.gatherTarget = null;
+      unit.buildTarget = null;
+      setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
+      break;
+    case 'attackMove':
+      unit.state = 'attackMove';
+      unit.target = {
+        x: command.targetGrid.gx * CELL + CELL / 2,
+        y: command.targetGrid.gy * CELL + CELL / 2,
+      };
+      unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.gatherTarget = null;
       unit.buildTarget = null;
       setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
@@ -1641,6 +1758,7 @@ function applyCommand(unit, command) {
       if (!target || target.hp <= 0) break;
       unit.state = 'attack';
       unit.attackTarget = command.targetId;
+      unit._attackMoveTarget = null;
       unit.target = null;
       unit.gatherTarget = null;
       unit.buildTarget = null;
@@ -1654,6 +1772,7 @@ function applyCommand(unit, command) {
       unit.gatherTarget = command.gatherTarget;
       unit.target = null;
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.buildTarget = null;
       unit.gatherTimer = 0;
       setUnitPath(unit, command.gatherTarget.gx, command.gatherTarget.gy);
@@ -1666,6 +1785,7 @@ function applyCommand(unit, command) {
       unit.buildTarget = command.buildTargetId;
       unit.target = null;
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.gatherTarget = null;
       const bgx = Math.floor(building.x / CELL);
       const bgy = Math.floor(building.y / CELL);
@@ -1878,7 +1998,11 @@ function cycleSubGroup() {
 window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
 
-  if (e.key === 'Escape') cancelBuild();
+  if (e.key === 'Escape') {
+    if (game.attackMoveMode) setAttackMoveMode(false);
+    cancelBuild();
+    return;
+  }
 
   // Use e.code for modifier combos since Shift/Alt change e.key (e.g. Shift+3 → '#')
   let numKey = parseInt(e.key);
@@ -1913,6 +2037,20 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     cycleSubGroup();
     return;
+  }
+
+  if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.altKey) {
+    const hasSelectedUnit = game.selected
+      .map(id => entities.find(en => en.id === id))
+      .some(en => en && en.kind === 'unit' && en.team === TEAM_PLAYER);
+    if (hasSelectedUnit) {
+      e.preventDefault();
+      game.keysDown[e.key] = false;
+      if (game.buildMode) cancelBuild();
+      setAttackMoveMode(true, e.shiftKey);
+      addLog(e.shiftKey ? '⚔️ 选择攻击移动目标（排队）' : '⚔️ 选择攻击移动目标');
+      return;
+    }
   }
 
   // 数字键: 先尝试原有快捷键，无效则召回编队
