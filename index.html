@@ -1673,13 +1673,40 @@ function applyCommand(unit, command) {
   }
 }
 
-function transitionToIdle(unit) {
-  if (unit.actionQueue.length > 0) {
-    const nextCommand = unit.actionQueue.shift();
-    applyCommand(unit, nextCommand);
-  } else {
-    unit.state = 'idle';
+function isCommandValid(command, unit) {
+  if (!command || !unit) return false;
+
+  switch (command.type) {
+    case 'move':
+      return true;
+    case 'attack': {
+      const target = entities.find(t => t.id === command.targetId);
+      return !!target && target.hp > 0;
+    }
+    case 'gather': {
+      if (unit.type !== 'worker' || !command.gatherTarget) return false;
+      const { gx, gy } = command.gatherTarget;
+      return mapLayers.resource[gy]?.[gx] === 1;
+    }
+    case 'build': {
+      if (unit.type !== 'worker') return false;
+      const building = entities.find(b => b.id === command.buildTargetId);
+      return !!building && building.hp > 0 && building.buildProgress < building.maxHp;
+    }
+    default:
+      return false;
   }
+}
+
+function transitionToIdle(unit) {
+  while (unit.actionQueue.length > 0) {
+    const nextCommand = unit.actionQueue.shift();
+    if (isCommandValid(nextCommand, unit)) {
+      applyCommand(unit, nextCommand);
+      return;
+    }
+  }
+  unit.state = 'idle';
 }
 
 function issueCommand(mx, my, isShiftHeld = false) {
