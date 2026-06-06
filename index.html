@@ -299,6 +299,7 @@ const game = {
   dragEnd: null,
   buildMode: null,
   buildPreview: null,
+  commandMode: null,
   paused: false,
   gameOver: false,
   scrollSpeed: 8,
@@ -456,12 +457,47 @@ function update() {
         }
         break;
       }
+      case 'patrol': {
+        const nearby = findNearestEnemy(e, def.range + 2);
+        if (nearby) {
+          e.attackTarget = nearby.id;
+          e._patrolState = {
+            pointA: e.patrolPointA,
+            pointB: e.patrolPointB,
+            toB: e.patrolToB,
+          };
+          e.state = 'attack';
+          e.path = [];
+          e.pathRetryFrame = 0;
+          break;
+        }
+
+        const dest = e.patrolToB ? e.patrolPointB : e.patrolPointA;
+        if (!dest) { transitionToIdle(e); break; }
+
+        if (e.path.length > 0) {
+          const arrived = followPath(e, speed);
+          if (arrived) {
+            e.patrolToB = !e.patrolToB;
+            const next = e.patrolToB ? e.patrolPointB : e.patrolPointA;
+            if (next) setUnitPath(e, Math.floor(next.x / CELL), Math.floor(next.y / CELL));
+          }
+        } else {
+          const tgx = Math.floor(dest.x / CELL);
+          const tgy = Math.floor(dest.y / CELL);
+          setUnitPath(e, tgx, tgy);
+          if (e.path.length === 0 && moveToward(e, dest.x, dest.y, speed)) {
+            e.patrolToB = !e.patrolToB;
+          }
+        }
+        break;
+      }
       case 'attack': {
         const target = entities.find(t => t.id === e.attackTarget);
         if (!target || target.hp <= 0) {
           e.attackTarget = null;
           e.path = [];
-          transitionToIdle(e);
+          resumePatrolOrIdle(e);
           break;
         }
         const d = dist(e, target);
@@ -485,7 +521,7 @@ function update() {
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
-              transitionToIdle(e);
+              resumePatrolOrIdle(e);
               checkGameOver();
             }
           }
@@ -962,6 +998,12 @@ function render() {
         ctx.fillText('🔨', sx + 10, sy + 10);
       }
 
+      if (e.state === 'patrol') {
+        ctx.fillStyle = '#00e5ff';
+        ctx.font = '9px Courier New';
+        ctx.fillText('P', sx + 10, sy + 10);
+      }
+
       drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, e.team);
     }
   }
@@ -1035,7 +1077,7 @@ function render() {
 
       for (const cmd of leader.actionQueue) {
         let nx, ny;
-        if (cmd.type === 'move') {
+        if (cmd.type === 'move' || cmd.type === 'patrol') {
           nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
           ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
         } else if (cmd.type === 'attack') {
@@ -1076,6 +1118,45 @@ function render() {
       }
 
       ctx.setLineDash([]);
+    }
+  }
+
+  // Patrol route preview for selected units.
+  {
+    const patrolUnits = game.selected
+      .map(id => entities.find(en => en.id === id))
+      .filter(u => u && u.kind === 'unit' && (u.state === 'patrol' || u._patrolState));
+
+    if (patrolUnits.length > 0) {
+      ctx.strokeStyle = '#00e5ff';
+      ctx.fillStyle = '#00e5ff';
+      ctx.setLineDash([8, 5]);
+      ctx.lineWidth = 2;
+
+      for (const unit of patrolUnits) {
+        const state = unit._patrolState || {
+          pointA: unit.patrolPointA,
+          pointB: unit.patrolPointB,
+        };
+        const a = state.pointA;
+        const b = state.pointB;
+        if (!a || !b) continue;
+
+        const ax = a.x - camera.x;
+        const ay = a.y - camera.y;
+        const bx = b.x - camera.x;
+        const by = b.y - camera.y;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+
+        drawPatrolArrow(ax, ay, bx, by);
+        drawPatrolArrow(bx, by, ax, ay);
+      }
+
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
     }
   }
 
@@ -1138,6 +1219,17 @@ function drawHpBar(x, y, w, hp, maxHp, team) {
   ctx.fillRect(x, y, w, 3);
   ctx.fillStyle = pct > 0.5 ? '#0f0' : pct > 0.25 ? '#ff0' : '#f00';
   ctx.fillRect(x, y, w * pct, 3);
+}
+
+function drawPatrolArrow(fromX, fromY, toX, toY) {
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  const size = 8;
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - Math.cos(angle - Math.PI / 6) * size, toY - Math.sin(angle - Math.PI / 6) * size);
+  ctx.lineTo(toX - Math.cos(angle + Math.PI / 6) * size, toY - Math.sin(angle + Math.PI / 6) * size);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function renderMinimap() {
@@ -1232,6 +1324,16 @@ function updateGuide() {
     html += '<div class="guide-section">';
     html += row('左键', '放置建筑');
     html += row('右键/Esc', '取消建造');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
+  if (game.commandMode === 'patrol') {
+    html += '<div class="guide-section">';
+    html += row('Left click', 'Set patrol point');
+    html += row('Shift+click', 'Queue patrol');
+    html += row('Right/Esc', 'Cancel');
     html += '</div>';
     guideEl.innerHTML = html;
     return;
@@ -1393,7 +1495,7 @@ function updateSidebar() {
       infoEl.innerHTML = html;
     }
 
-    let btns = '';
+    let btns = '<button class="btn" onclick="startPatrolCommand()"><span class="btn-key">[P]</span> Patrol</button>';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
       const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
@@ -1426,13 +1528,27 @@ function startBuild(type) {
   const bDef = BUILDING_DEFS[type];
   if (game.minerals < bDef.cost) { addLog('矿石不足！'); return; }
   game.buildMode = type;
+  game.commandMode = null;
   addLog(`进入建造模式: ${bDef.desc} - 左键放置`);
+  updateSidebar();
+}
+
+function startPatrolCommand() {
+  const hasUnitSelected = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .some(e => e && e.kind === 'unit' && e.team === TEAM_PLAYER);
+  if (!hasUnitSelected) return;
+  game.buildMode = null;
+  game.buildPreview = null;
+  game.commandMode = 'patrol';
+  addLog('Patrol mode: left-click a destination');
   updateSidebar();
 }
 
 function cancelBuild() {
   game.buildMode = null;
   game.buildPreview = null;
+  game.commandMode = null;
   updateSidebar();
 }
 
@@ -1467,6 +1583,10 @@ canvas.addEventListener('mousedown', (e) => {
   const my = e.offsetY;
 
   if (e.button === 0) {
+    if (game.commandMode) {
+      issueCommand(mx, my, e.shiftKey);
+      return;
+    }
     if (game.buildMode) {
       const gx = Math.floor((mx + camera.x) / CELL);
       const gy = Math.floor((my + camera.y) / CELL);
@@ -1478,6 +1598,10 @@ canvas.addEventListener('mousedown', (e) => {
   }
   if (e.button === 2) {
     e.preventDefault();
+    if (game.commandMode) {
+      game.commandMode = null;
+      updateSidebar();
+    }
     if (game.buildMode) {
       cancelBuild();
       return;
@@ -1621,9 +1745,37 @@ function applyRallyPoint(building, unit) {
 }
 
 // ---- 指令排队系统 ----
+function clearPatrol(unit) {
+  unit.patrolPointA = null;
+  unit.patrolPointB = null;
+  unit.patrolToB = true;
+  unit._patrolState = null;
+}
+
+function resumePatrolOrIdle(unit) {
+  if (unit._patrolState) {
+    const patrolState = unit._patrolState;
+    unit.patrolPointA = patrolState.pointA;
+    unit.patrolPointB = patrolState.pointB;
+    unit.patrolToB = patrolState.toB;
+    unit._patrolState = null;
+    unit.target = null;
+    unit.attackTarget = null;
+    unit.gatherTarget = null;
+    unit.buildTarget = null;
+    unit.path = [];
+    unit.state = 'patrol';
+    const dest = unit.patrolToB ? unit.patrolPointB : unit.patrolPointA;
+    if (dest) setUnitPath(unit, Math.floor(dest.x / CELL), Math.floor(dest.y / CELL));
+  } else {
+    transitionToIdle(unit);
+  }
+}
+
 function applyCommand(unit, command) {
   switch (command.type) {
     case 'move':
+      clearPatrol(unit);
       unit.state = 'move';
       unit.target = {
         x: command.targetGrid.gx * CELL + CELL / 2,
@@ -1637,6 +1789,7 @@ function applyCommand(unit, command) {
     case 'attack': {
       const target = entities.find(t => t.id === command.targetId);
       if (!target || target.hp <= 0) break;
+      clearPatrol(unit);
       unit.state = 'attack';
       unit.attackTarget = command.targetId;
       unit.target = null;
@@ -1648,6 +1801,7 @@ function applyCommand(unit, command) {
     }
     case 'gather':
       if (unit.type !== 'worker') break;
+      clearPatrol(unit);
       unit.state = 'gather';
       unit.gatherTarget = command.gatherTarget;
       unit.target = null;
@@ -1660,6 +1814,7 @@ function applyCommand(unit, command) {
       if (unit.type !== 'worker') break;
       const building = entities.find(b => b.id === command.buildTargetId);
       if (!building || building.hp <= 0) break;
+      clearPatrol(unit);
       unit.state = 'build';
       unit.buildTarget = command.buildTargetId;
       unit.target = null;
@@ -1670,6 +1825,21 @@ function applyCommand(unit, command) {
       setUnitPath(unit, bgx, bgy);
       break;
     }
+    case 'patrol':
+      unit.state = 'patrol';
+      unit.target = null;
+      unit.attackTarget = null;
+      unit.gatherTarget = null;
+      unit.buildTarget = null;
+      unit.patrolPointA = { x: unit.x, y: unit.y };
+      unit.patrolPointB = {
+        x: command.targetGrid.gx * CELL + CELL / 2,
+        y: command.targetGrid.gy * CELL + CELL / 2,
+      };
+      unit.patrolToB = true;
+      unit._patrolState = null;
+      setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
+      break;
   }
 }
 
@@ -1693,7 +1863,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
     .map(id => entities.find(e => e.id === id))
     .filter(e => e && e.kind === 'building' && e.team === TEAM_PLAYER && e.buildProgress >= e.maxHp);
 
-  if (selectedBuildings.length > 0) {
+  if (!game.commandMode && selectedBuildings.length > 0) {
     const isMineral = mapLayers.resource[gy]?.[gx] === 1;
     const rpType = isMineral ? 'mineral' : 'move';
     for (const b of selectedBuildings) {
@@ -1715,7 +1885,10 @@ function issueCommand(mx, my, isShiftHeld = false) {
   // 构建指令对象
   let command = null;
 
-  if (target && target.team === TEAM_ENEMY) {
+  if (game.commandMode === 'patrol') {
+    command = { type: 'patrol', targetGrid: { gx, gy } };
+    addLog(isShiftHeld ? 'Patrol queued' : 'Patrol command');
+  } else if (target && target.team === TEAM_ENEMY) {
     command = { type: 'attack', targetId: target.id };
     addLog(isShiftHeld ? '⚔️ 排队攻击!' : '⚔️ 命令攻击!');
   } else if (mapLayers.resource[gy]?.[gx] === 1) {
@@ -1741,15 +1914,19 @@ function issueCommand(mx, my, isShiftHeld = false) {
     } else {
       // 立即执行：对移动指令计算阵型偏移
       let cmd = command;
-      if (command.type === 'move') {
+      if (command.type === 'move' || command.type === 'patrol') {
         const row = Math.floor(i / cols);
         const col = i % cols;
-        cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+        cmd = { type: command.type, targetGrid: { gx: gx + col, gy: gy + row } };
       }
       u.actionQueue = [];
       applyCommand(u, cmd);
     }
   });
+  if (game.commandMode) {
+    game.commandMode = null;
+    updateSidebar();
+  }
 }
 
 // 小地图点击
@@ -1860,6 +2037,12 @@ window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
 
   if (e.key === 'Escape') cancelBuild();
+
+  if (e.key.toLowerCase() === 'p' && game.selected.length > 0 && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    startPatrolCommand();
+    return;
+  }
 
   // Use e.code for modifier combos since Shift/Alt change e.key (e.g. Shift+3 → '#')
   let numKey = parseInt(e.key);

@@ -55,6 +55,10 @@ function createUnit(type, gx, gy, team) {
     gatherTimer: 0,
     path: [],
     pathRetryFrame: 0,
+    patrolPointA: null,
+    patrolPointB: null,
+    patrolToB: true,
+    _patrolState: null,
     actionQueue: [],
   };
   entities.push(e);
