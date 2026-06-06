@@ -264,6 +264,8 @@ const LOG_H = 80;
 const GATHER_AMOUNT = 5;
 const GATHER_TIME = 90;
 const BUILD_RANGE = 3;
+const EDGE_SCROLL_MARGIN = 20;
+const EDGE_SCROLL_SPEED = 6;
 
 // ---- Canvas初始化 ----
 const canvas = document.getElementById('gameCanvas');
@@ -285,6 +287,40 @@ function clampCamera() {
   const maxY = MAP_H * CELL - canvas.height + LOG_H;
   camera.x = Math.max(0, Math.min(camera.x, maxX));
   camera.y = Math.max(0, Math.min(camera.y, maxY));
+}
+
+// ---- 鼠标边缘滚动 ----
+const mouseScreen = {
+  x: window.innerWidth / 2,
+  y: window.innerHeight / 2,
+  active: false,
+};
+
+document.addEventListener('mousemove', (e) => {
+  mouseScreen.x = e.clientX;
+  mouseScreen.y = e.clientY;
+  mouseScreen.active = true;
+});
+
+document.addEventListener('mouseleave', () => {
+  mouseScreen.active = false;
+});
+
+window.addEventListener('blur', () => {
+  mouseScreen.active = false;
+});
+
+function applyEdgeScroll() {
+  if (!mouseScreen.active) return;
+
+  const playableRight = canvas.width;
+  const mouseInPlayableX = mouseScreen.x >= 0 && mouseScreen.x <= playableRight;
+  if (!mouseInPlayableX) return;
+
+  if (mouseScreen.x < EDGE_SCROLL_MARGIN) camera.x -= EDGE_SCROLL_SPEED;
+  if (mouseScreen.x > playableRight - EDGE_SCROLL_MARGIN) camera.x += EDGE_SCROLL_SPEED;
+  if (mouseScreen.y < HUD_H + EDGE_SCROLL_MARGIN) camera.y -= EDGE_SCROLL_SPEED;
+  if (mouseScreen.y > window.innerHeight - EDGE_SCROLL_MARGIN) camera.y += EDGE_SCROLL_SPEED;
 }
 
 // ---- 游戏状态 ----
@@ -391,6 +427,7 @@ function update() {
   if (game.keysDown['ArrowRight'] || game.keysDown['d']) camera.x += game.scrollSpeed;
   if (game.keysDown['ArrowUp'] || game.keysDown['w']) camera.y -= game.scrollSpeed;
   if (game.keysDown['ArrowDown'] || game.keysDown['s']) camera.y += game.scrollSpeed;
+  applyEdgeScroll();
   clampCamera();
 
   for (const e of entities) {
