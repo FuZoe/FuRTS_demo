@@ -301,6 +301,14 @@ const game = {
   buildPreview: null,
   paused: false,
   gameOver: false,
+  stats: {
+    mineralsGathered: 0,
+    unitsProduced: 0,
+    unitsLost: 0,
+    unitsKilled: 0,
+    buildingsBuilt: 0,
+    buildingsDestroyed: 0,
+  },
   scrollSpeed: 8,
   keysDown: {},
 };
@@ -363,6 +371,13 @@ function formatTime(frame) {
   return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 }
 
+function recordPlayerKill(attacker, target) {
+  if (!attacker || !target || attacker.team !== TEAM_PLAYER || target.team !== TEAM_ENEMY || target._statsKillCounted) return;
+  target._statsKillCounted = true;
+  if (target.kind === 'building') game.stats.buildingsDestroyed++;
+  else if (target.kind === 'unit') game.stats.unitsKilled++;
+}
+
 // ---- 人口计算 ----
 function countPop() {
   let pop = 0;
@@ -404,7 +419,10 @@ function update() {
         const enemy = findNearestEnemy(e, 6);
         if (enemy && game.frame % 30 === 0) {
           enemy.hp -= 20;
-          if (enemy.hp <= 0) addLog(`防御塔消灭了 ${UNIT_DEFS[enemy.type]?.char || '敌人'}`);
+          if (enemy.hp <= 0) {
+            recordPlayerKill(e, enemy);
+            addLog(`防御塔消灭了 ${UNIT_DEFS[enemy.type]?.char || '敌人'}`);
+          }
         }
       }
       // 生产队列
@@ -419,6 +437,7 @@ function update() {
           applyRallyPoint(e, newUnit);
           e.queue.shift();
           e.queueTimer = 0;
+          if (e.team === TEAM_PLAYER) game.stats.unitsProduced++;
           if (e.team === TEAM_PLAYER) addLog(`生产完成: ${def.desc}`);
         }
       }
@@ -483,6 +502,7 @@ function update() {
           if (game.frame % 20 === 0) {
             target.hp -= def.atk;
             if (target.hp <= 0) {
+              recordPlayerKill(e, target);
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
               transitionToIdle(e);
@@ -498,7 +518,10 @@ function update() {
           if (!base) { transitionToIdle(e); break; }
           const d = dist(e, base);
           if (d < CELL * 3) {
-            if (e.team === TEAM_PLAYER) game.minerals += e.carrying;
+            if (e.team === TEAM_PLAYER) {
+              game.minerals += e.carrying;
+              game.stats.mineralsGathered += e.carrying;
+            }
             e.carrying = 0;
             e.gatherTimer = 0;
             e.path = [];
@@ -565,6 +588,10 @@ function update() {
           e.path = [];
           building.buildProgress = Math.min(building.maxHp, building.buildProgress + 2);
           if (building.buildProgress >= building.maxHp) {
+            if (building.team === TEAM_PLAYER && !building._statsBuiltCounted) {
+              building._statsBuiltCounted = true;
+              game.stats.buildingsBuilt++;
+            }
             addLog(`建筑完成: ${BUILDING_DEFS[building.type].desc}`);
             e.buildTarget = null;
             transitionToIdle(e);
@@ -579,6 +606,7 @@ function update() {
   for (let i = entities.length - 1; i >= 0; i--) {
     if (entities[i].hp <= 0) {
       const dead = entities[i];
+      if (dead.team === TEAM_PLAYER && dead.kind === 'unit') game.stats.unitsLost++;
       if (dead.kind === 'building') {
         const bDef = BUILDING_DEFS[dead.type];
         for (let dy = 0; dy < bDef.h; dy++) {
@@ -1115,17 +1143,44 @@ function render() {
 
   // 游戏结束覆盖层
   if (game.gameOver) {
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    const isDefeat = entities.filter(e => e.team === TEAM_PLAYER && e.kind === 'building' && e.type === 'base' && e.hp > 0).length === 0;
+    const panelW = Math.min(460, canvas.width - 48);
+    const panelH = 340;
+    const panelX = (canvas.width - panelW) / 2;
+    const panelY = Math.max(36, (canvas.height - panelH) / 2);
+    const stats = [
+      `游戏时长: ${formatTime(game.frame)}`,
+      `矿石采集: ${game.stats.mineralsGathered}`,
+      `单位生产: ${game.stats.unitsProduced}`,
+      `敌方击杀: ${game.stats.unitsKilled}`,
+      `己方损失: ${game.stats.unitsLost}`,
+      `建筑建造: ${game.stats.buildingsBuilt}`,
+      `摧毁敌建: ${game.stats.buildingsDestroyed}`,
+    ];
+
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0f0';
-    ctx.font = 'bold 48px Courier New';
+    ctx.fillStyle = 'rgba(12,18,14,0.92)';
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = isDefeat ? '#f44' : '#0f0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+    ctx.fillStyle = isDefeat ? '#f44' : '#0f0';
+    ctx.font = 'bold 36px Courier New';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const msg = entities.filter(e => e.team === TEAM_PLAYER && e.kind === 'building' && e.type === 'base' && e.hp > 0).length === 0
-      ? '游戏失败' : '胜利！';
-    ctx.fillText(msg, canvas.width / 2, canvas.height / 2 - 20);
-    ctx.font = '20px Courier New';
-    ctx.fillText('按 R 重新开始', canvas.width / 2, canvas.height / 2 + 30);
+    ctx.fillText(isDefeat ? '战败' : '胜利！', canvas.width / 2, panelY + 52);
+
+    ctx.fillStyle = '#d7ffd7';
+    ctx.font = '18px Courier New';
+    ctx.textAlign = 'left';
+    stats.forEach((s, i) => ctx.fillText(s, panelX + 64, panelY + 110 + i * 28));
+
+    ctx.fillStyle = '#9f9';
+    ctx.font = '18px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('按 R 重新开始', canvas.width / 2, panelY + panelH - 34);
   }
 
   renderMinimap();
