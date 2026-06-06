@@ -287,11 +287,69 @@ function clampCamera() {
   camera.y = Math.max(0, Math.min(camera.y, maxY));
 }
 
+// ---- 科技升级系统 ----
+const UPGRADES = {
+  attackUp1: { name: '攻击升级 Lv1', cost: 100, time: 300, effect: { atk: 2 }, requires: [] },
+  attackUp2: { name: '攻击升级 Lv2', cost: 150, time: 400, effect: { atk: 3 }, requires: ['attackUp1'] },
+  armorUp1:  { name: '护甲升级 Lv1', cost: 100, time: 300, effect: { armor: 1 }, requires: [] },
+  speedUp1:  { name: '速度升级 Lv1', cost: 120, time: 250, effect: { speedMult: 0.15 }, requires: [] },
+};
+
+const UPGRADE_KEYS = Object.keys(UPGRADES);
+
+function createUpgradeState() {
+  const state = {};
+  for (const key of UPGRADE_KEYS) state[key] = { researched: false };
+  return state;
+}
+
+function getEffectiveUnitStats(unitOrType, team = TEAM_PLAYER) {
+  const type = typeof unitOrType === 'string' ? unitOrType : unitOrType.type;
+  const unitTeam = typeof unitOrType === 'string' ? team : unitOrType.team;
+  const def = UNIT_DEFS[type];
+  const stats = {
+    atk: def.atk,
+    speed: def.speed,
+    armor: 0,
+    range: def.range,
+  };
+
+  if (unitTeam !== TEAM_PLAYER) return stats;
+
+  let speedMult = 0;
+  for (const [key, upgrade] of Object.entries(UPGRADES)) {
+    if (!game.upgrades[key]?.researched) continue;
+    if (upgrade.effect.atk) stats.atk += upgrade.effect.atk;
+    if (upgrade.effect.armor) stats.armor += upgrade.effect.armor;
+    if (upgrade.effect.speedMult) speedMult += upgrade.effect.speedMult;
+  }
+  stats.speed *= 1 + speedMult;
+  return stats;
+}
+
+function getEffectiveArmor(entity) {
+  if (!entity || entity.kind !== 'unit') return 0;
+  return getEffectiveUnitStats(entity).armor;
+}
+
+function getUpgradeStatus(key, building = null) {
+  const upgrade = UPGRADES[key];
+  if (!upgrade) return { available: false, reason: '未知科技' };
+  if (game.upgrades[key]?.researched) return { available: false, reason: '已完成' };
+  if (building?.researchQueue?.some(item => item === key)) return { available: false, reason: '研究中' };
+  for (const req of upgrade.requires) {
+    if (!game.upgrades[req]?.researched) return { available: false, reason: `需要 ${UPGRADES[req].name}` };
+  }
+  if (game.minerals < upgrade.cost) return { available: false, reason: '矿石不足' };
+  return { available: true, reason: '' };
+}
+
 // ---- 游戏状态 ----
 const game = {
   minerals: 200,
   pop: 0,
   maxPop: 10,
+  upgrades: createUpgradeState(),
   frame: 0,
   selected: [],
   controlGroups: {},
@@ -408,6 +466,20 @@ function update() {
         }
       }
       // 生产队列
+      if (e.researchQueue && e.researchQueue.length > 0) {
+        e.researchTimer++;
+        const upgradeKey = e.researchQueue[0];
+        const upgrade = UPGRADES[upgradeKey];
+        if (e.researchTimer >= upgrade.time) {
+          game.upgrades[upgradeKey].researched = true;
+          e.researchQueue.shift();
+          e.researchTimer = 0;
+          if (e.team === TEAM_PLAYER) addLog(`研究完成: ${upgrade.name}`);
+          updateSidebar();
+        } else if (e.team === TEAM_PLAYER && game.selected.includes(e.id) && game.frame % 15 === 0) {
+          updateSidebar();
+        }
+      }
       if (e.queue.length > 0) {
         e.queueTimer++;
         const producing = e.queue[0];
@@ -427,11 +499,12 @@ function update() {
 
     // -- 单位逻辑 --
     const def = UNIT_DEFS[e.type];
-    const speed = def.speed * getTerrainSpeedMult(e.gx, e.gy);
+    const stats = getEffectiveUnitStats(e);
+    const speed = stats.speed * getTerrainSpeedMult(e.gx, e.gy);
 
     // 自动反击
     if (e.state === 'idle' || e.state === 'move') {
-      const nearby = findNearestEnemy(e, def.range + 2);
+      const nearby = findNearestEnemy(e, stats.range + 2);
       if (nearby && e.state === 'idle') {
         e.attackTarget = nearby.id;
         e.state = 'attack';
@@ -465,7 +538,7 @@ function update() {
           break;
         }
         const d = dist(e, target);
-        if (d > def.range * CELL) {
+        if (d > stats.range * CELL) {
           // 远距离用A*寻路，每60帧重算一次
           if (e.path.length > 0) {
             followPath(e, speed);
@@ -481,7 +554,8 @@ function update() {
         } else {
           e.path = [];
           if (game.frame % 20 === 0) {
-            target.hp -= def.atk;
+            const damage = Math.max(1, stats.atk - getEffectiveArmor(target));
+            target.hp -= damage;
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
@@ -1351,6 +1425,12 @@ function updateSidebar() {
     if (first.queue.length > 0) {
       html += `<br>生产中: ${UNIT_DEFS[first.queue[0]].char} (${first.queue.length}个排队)`;
     }
+    if (first.researchQueue && first.researchQueue.length > 0) {
+      const upgradeKey = first.researchQueue[0];
+      const upgrade = UPGRADES[upgradeKey];
+      const pct = Math.floor(first.researchTimer / upgrade.time * 100);
+      html += `<br>研究中: ${upgrade.name} (${pct}%)`;
+    }
     if (first.team === TEAM_PLAYER && bDef.produces) {
       if (first.rallyPoint) {
         const rp = first.rallyPoint;
@@ -1373,13 +1453,30 @@ function updateSidebar() {
         </button>`;
       }
     }
+    if (first.buildProgress >= first.maxHp && first.team === TEAM_PLAYER && first.type === 'base') {
+      const researchKeyMap = { attackUp1: '5', attackUp2: '6', armorUp1: '7', speedUp1: '8' };
+      btns += '<div style="margin-top:8px;color:#0a0;border-top:1px solid #030;padding-top:6px">科技研究</div>';
+      for (const key of UPGRADE_KEYS) {
+        const upgrade = UPGRADES[key];
+        const status = getUpgradeStatus(key, first);
+        const hotkey = researchKeyMap[key] || '';
+        const progress = first.researchQueue?.[0] === key
+          ? ` ${Math.floor(first.researchTimer / upgrade.time * 100)}%`
+          : '';
+        btns += `<button class="btn" onclick="researchUpgrade('${key}', ${first.id})" ${status.available ? '' : 'disabled'} title="${status.reason}">
+          <span class="btn-key">[${hotkey}]</span> ${upgrade.name}${progress} <span class="cost">${upgrade.cost}矿</span>
+        </button>`;
+      }
+    }
     actionsEl.innerHTML = btns;
   } else {
     if (selectedEntities.length === 1) {
       const uDef = UNIT_DEFS[first.type];
+      const stats = getEffectiveUnitStats(first);
       let html = `<span style="color:${uDef.color}">${uDef.char} ${uDef.desc}</span><br>`;
       html += `HP: ${first.hp}/${first.maxHp}<br>`;
-      html += `攻击: ${uDef.atk} | 射程: ${uDef.range}<br>`;
+      html += `攻击: ${stats.atk} | 护甲: ${stats.armor} | 速度: ${stats.speed.toFixed(2)}<br>`;
+      html += `射程: ${stats.range}<br>`;
       html += `状态: ${first.state}`;
       if (first.carrying > 0) html += `<br>携带矿石: ${first.carrying}`;
       infoEl.innerHTML = html;
@@ -1421,6 +1518,24 @@ function trainUnit(type, buildingId) {
   game.minerals -= uDef.cost;
   building.queue.push(type);
   addLog(`开始生产: ${uDef.desc}`);
+  updateSidebar();
+}
+
+function researchUpgrade(key, buildingId) {
+  const building = entities.find(e => e.id === buildingId);
+  const upgrade = UPGRADES[key];
+  if (!building || !upgrade || building.kind !== 'building' || building.type !== 'base') return;
+  if (building.team !== TEAM_PLAYER || building.buildProgress < building.maxHp) return;
+
+  const status = getUpgradeStatus(key, building);
+  if (!status.available) {
+    if (status.reason) addLog(status.reason);
+    return;
+  }
+
+  game.minerals -= upgrade.cost;
+  building.researchQueue.push(key);
+  addLog(`开始研究: ${upgrade.name}`);
   updateSidebar();
 }
 
@@ -1936,6 +2051,14 @@ window.addEventListener('keydown', (e) => {
     }
     if (numKey === 4) {
       if (hasWorker) { startBuild('supply'); handled = true; }
+    }
+    if (selBuilding && selBuilding.type === 'base') {
+      const upgradeKeyMap = { 5: 'attackUp1', 6: 'attackUp2', 7: 'armorUp1', 8: 'speedUp1' };
+      const upgradeKey = upgradeKeyMap[numKey];
+      if (upgradeKey) {
+        researchUpgrade(upgradeKey, selBuilding.id);
+        handled = true;
+      }
     }
 
     if (!handled) recallControlGroup(numKey);

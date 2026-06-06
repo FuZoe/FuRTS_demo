@@ -77,6 +77,8 @@ function createBuilding(type, gx, gy, team) {
     buildProgress: type === 'base' ? def.hp : 0,
     queue: [],
     queueTimer: 0,
+    researchQueue: [],
+    researchTimer: 0,
     rallyPoint: null,
   };
   for (let dy = 0; dy < def.h; dy++) {
