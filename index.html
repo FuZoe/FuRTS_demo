@@ -99,6 +99,41 @@ body {
   border-top: 1px solid #0a0;
   line-height: 1.6;
 }
+.selection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 30px);
+  gap: 4px;
+  margin-top: 6px;
+}
+.selection-icon {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: #020;
+  border: 1px solid #0a0;
+  color: #0f0;
+  cursor: pointer;
+  font: bold 14px 'Courier New', monospace;
+  line-height: 26px;
+  text-align: center;
+}
+.selection-icon:hover {
+  background: #040;
+  border-color: #0f0;
+}
+.selection-icon .hp-track {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  height: 3px;
+  background: #300;
+}
+.selection-icon .hp-fill {
+  display: block;
+  height: 100%;
+}
 #minimap {
   margin-top: 10px;
   border: 1px solid #0a0;
@@ -1390,6 +1425,17 @@ function updateSidebar() {
       for (const [type, count] of Object.entries(counts)) {
         html += `${UNIT_DEFS[type].char} x${count} `;
       }
+      html += '<div class="selection-grid">';
+      for (const e of selectedEntities) {
+        const uDef = UNIT_DEFS[e.type];
+        const hpPct = Math.max(0, Math.min(100, Math.floor(e.hp / e.maxHp * 100)));
+        const hpColor = hpPct > 50 ? '#0f0' : hpPct > 25 ? '#ff0' : '#f00';
+        html += `<button class="selection-icon" onclick="selectUnitIcon(event, ${e.id})" oncontextmenu="deselectUnitIcon(event, ${e.id})" title="${uDef.desc} HP:${e.hp}/${e.maxHp}">
+          <span style="color:${uDef.color}">${uDef.char}</span>
+          <span class="hp-track"><span class="hp-fill" style="width:${hpPct}%;background:${hpColor}"></span></span>
+        </button>`;
+      }
+      html += '</div>';
       infoEl.innerHTML = html;
     }
 
@@ -1407,6 +1453,43 @@ function updateSidebar() {
     }
     actionsEl.innerHTML = btns;
   }
+}
+
+function selectUnitIcon(event, id) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.shiftKey) {
+    deselectUnit(id);
+    return;
+  }
+  focusUnit(id);
+}
+
+function deselectUnitIcon(event, id) {
+  event.preventDefault();
+  event.stopPropagation();
+  deselectUnit(id);
+}
+
+function focusUnit(id) {
+  const unit = entities.find(e => e.id === id && e.hp > 0);
+  if (!unit) return;
+  game.selected = [id];
+  game._subGroupType = null;
+  game._fullSelection = null;
+  camera.x = unit.x - canvas.width / 2;
+  camera.y = unit.y - canvas.height / 2;
+  clampCamera();
+  updateSidebar();
+}
+
+function deselectUnit(id) {
+  game.selected = game.selected.filter(sid => sid !== id);
+  if (game.selected.length === 0) {
+    game._subGroupType = null;
+    game._fullSelection = null;
+  }
+  updateSidebar();
 }
 
 // ---- 操作命令 ----
