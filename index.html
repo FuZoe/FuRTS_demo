@@ -1726,20 +1726,20 @@ function issueCommand(mx, my, isShiftHeld = false) {
   const cols = Math.ceil(Math.sqrt(count));
 
   selectedUnits.forEach((u, i) => {
-    // 对移动指令，计算阵型偏移
-    let cmd = command;
-    if (command.type === 'move') {
-      const row = Math.floor(i / cols);
-      const col = i % cols;
-      cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
-    }
-
     if (isShiftHeld) {
-      u.actionQueue.push(cmd);
+      // 排队指令不使用阵型偏移，所有单位共享同一目标点，确保同步到达
+      u.actionQueue.push(command);
       if (u.state === 'idle') {
         transitionToIdle(u);
       }
     } else {
+      // 立即执行：对移动指令计算阵型偏移
+      let cmd = command;
+      if (command.type === 'move') {
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+      }
       u.actionQueue = [];
       applyCommand(u, cmd);
     }
