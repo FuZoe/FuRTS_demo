@@ -1347,7 +1347,15 @@ function updateSidebar() {
       html += `建造中: ${Math.floor(first.buildProgress / first.maxHp * 100)}%`;
     }
     if (first.queue.length > 0) {
-      html += `<br>生产中: ${UNIT_DEFS[first.queue[0]].char} (${first.queue.length}个排队)`;
+      html += `<br>生产队列:`;
+      for (let i = 0; i < first.queue.length; i++) {
+        const uType = first.queue[i];
+        const uDef = UNIT_DEFS[uType];
+        const isFirst = i === 0;
+        const pct = isFirst ? Math.floor(first.queueTimer / uDef.buildTime * 100) : 0;
+        const label = isFirst ? `${uDef.char} ${pct}%` : uDef.char;
+        html += ` <button class="btn" style="display:inline;width:auto;padding:2px 6px;margin:2px 2px 0 0;" onclick="cancelProduction(${first.id}, ${i})">${label} ✕</button>`;
+      }
     }
     if (first.team === TEAM_PLAYER && bDef.produces) {
       if (first.rallyPoint) {
@@ -1420,6 +1428,24 @@ function trainUnit(type, buildingId) {
   building.queue.push(type);
   addLog(`开始生产: ${uDef.desc}`);
   updateSidebar();
+}
+
+function cancelProduction(buildingId, queueIndex) {
+  const building = entities.find(e => e.id === buildingId);
+  if (!building || !building.queue || queueIndex < 0 || queueIndex >= building.queue.length) return false;
+
+  const unitType = building.queue[queueIndex];
+  const uDef = UNIT_DEFS[unitType];
+  if (!uDef) return false;
+
+  if (queueIndex === 0) {
+    building.queueTimer = 0;
+  }
+  building.queue.splice(queueIndex, 1);
+  game.minerals += uDef.cost;
+  addLog(`取消生产: ${uDef.desc} (+${uDef.cost}矿)`);
+  updateSidebar();
+  return true;
 }
 
 function startBuild(type) {
@@ -1859,7 +1885,20 @@ function cycleSubGroup() {
 window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
 
-  if (e.key === 'Escape') cancelBuild();
+  if (e.key === 'Escape') {
+    if (game.buildMode) {
+      cancelBuild();
+    } else {
+      const selectedBuilding = game.selected
+        .map(id => entities.find(en => en.id === id))
+        .find(en => en && en.kind === 'building' && en.team === TEAM_PLAYER && en.queue && en.queue.length > 0);
+      if (selectedBuilding) {
+        cancelProduction(selectedBuilding.id, selectedBuilding.queue.length - 1);
+      }
+    }
+    e.preventDefault();
+    return;
+  }
 
   // Use e.code for modifier combos since Shift/Alt change e.key (e.g. Shift+3 → '#')
   let numKey = parseInt(e.key);
