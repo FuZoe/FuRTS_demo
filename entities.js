@@ -50,6 +50,7 @@ function createUnit(type, gx, gy, team) {
     target: null,
     attackTarget: null,
     gatherTarget: null,
+    lastGatherTarget: null,
     carrying: 0,
     buildTarget: null,
     gatherTimer: 0,
@@ -178,6 +179,7 @@ function distributeWorkersToMinerals(workers, mineralCells) {
     if (bestCell) {
       worker.state = 'gather';
       worker.gatherTarget = { gx: bestCell.gx, gy: bestCell.gy };
+      worker.lastGatherTarget = worker.gatherTarget;
       worker.gatherTimer = 0;
       setUnitPath(worker, bestCell.gx, bestCell.gy);
 
