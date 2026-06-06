@@ -1047,24 +1047,10 @@ function render() {
         waypoints.push({ x: nx, y: ny });
       }
 
-      // 为每个单位画路径线（所有线都汇聚到leader的路标位置）
+      // 为每个单位画路径线（起点吸附在单位实时位置，终点汇聚到leader路标）
       for (const unit of selectedWithQueue) {
         let prevX = unit.x - camera.x;
         let prevY = unit.y - camera.y;
-
-        if (unit.target) {
-          prevX = unit.target.x - camera.x;
-          prevY = unit.target.y - camera.y;
-        } else if (unit.state === 'attack' && unit.attackTarget) {
-          const at = entities.find(t => t.id === unit.attackTarget);
-          if (at) { prevX = at.x - camera.x; prevY = at.y - camera.y; }
-        } else if (unit.state === 'gather' && unit.gatherTarget) {
-          prevX = unit.gatherTarget.gx * CELL + CELL / 2 - camera.x;
-          prevY = unit.gatherTarget.gy * CELL + CELL / 2 - camera.y;
-        } else if (unit.state === 'build' && unit.buildTarget) {
-          const bt = entities.find(b => b.id === unit.buildTarget);
-          if (bt) { prevX = bt.x - camera.x; prevY = bt.y - camera.y; }
-        }
 
         for (const wp of waypoints) {
           ctx.beginPath();
