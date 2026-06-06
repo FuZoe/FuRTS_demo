@@ -1015,7 +1015,7 @@ function render() {
   {
     const selectedWithQueue = game.selected
       .map(id => entities.find(en => en.id === id))
-      .filter(u => u && u.kind === 'unit' && u.actionQueue.length > 0);
+      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || (u.state === 'move' && u.target)));
 
     if (selectedWithQueue.length > 0) {
       ctx.strokeStyle = '#ff0';
@@ -1027,6 +1027,12 @@ function render() {
 
       // 预计算leader队列的各路标屏幕坐标
       const waypoints = [];
+
+      // 将当前正在执行的目标也加入路标（避免已出队的第一个路标"消失"导致视觉跳跃）
+      if (leader.state === 'move' && leader.target) {
+        waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y });
+      }
+
       for (const cmd of leader.actionQueue) {
         let nx, ny;
         if (cmd.type === 'move') {
