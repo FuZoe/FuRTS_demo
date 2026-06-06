@@ -1022,7 +1022,32 @@ function render() {
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
 
-      // 为每个单位画路径线
+      // 用leader的队列作为共享路标（index 0 无阵型偏移，即原始点击位置）
+      const leader = selectedWithQueue[0];
+
+      // 预计算leader队列的各路标屏幕坐标
+      const waypoints = [];
+      for (const cmd of leader.actionQueue) {
+        let nx, ny;
+        if (cmd.type === 'move') {
+          nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
+          ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
+        } else if (cmd.type === 'attack') {
+          const at = entities.find(t => t.id === cmd.targetId);
+          if (!at) continue;
+          nx = at.x - camera.x; ny = at.y - camera.y;
+        } else if (cmd.type === 'gather') {
+          nx = cmd.gatherTarget.gx * CELL + CELL / 2 - camera.x;
+          ny = cmd.gatherTarget.gy * CELL + CELL / 2 - camera.y;
+        } else if (cmd.type === 'build') {
+          const bt = entities.find(b => b.id === cmd.buildTargetId);
+          if (!bt) continue;
+          nx = bt.x - camera.x; ny = bt.y - camera.y;
+        } else { continue; }
+        waypoints.push({ x: nx, y: ny });
+      }
+
+      // 为每个单位画路径线（所有线都汇聚到leader的路标位置）
       for (const unit of selectedWithQueue) {
         let prevX = unit.x - camera.x;
         let prevY = unit.y - camera.y;
@@ -1041,72 +1066,20 @@ function render() {
           if (bt) { prevX = bt.x - camera.x; prevY = bt.y - camera.y; }
         }
 
-        for (const cmd of unit.actionQueue) {
-          let nx, ny;
-          if (cmd.type === 'move') {
-            nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
-            ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
-          } else if (cmd.type === 'attack') {
-            const at = entities.find(t => t.id === cmd.targetId);
-            if (!at) continue;
-            nx = at.x - camera.x; ny = at.y - camera.y;
-          } else if (cmd.type === 'gather') {
-            nx = cmd.gatherTarget.gx * CELL + CELL / 2 - camera.x;
-            ny = cmd.gatherTarget.gy * CELL + CELL / 2 - camera.y;
-          } else if (cmd.type === 'build') {
-            const bt = entities.find(b => b.id === cmd.buildTargetId);
-            if (!bt) continue;
-            nx = bt.x - camera.x; ny = bt.y - camera.y;
-          } else { continue; }
-
+        for (const wp of waypoints) {
           ctx.beginPath();
           ctx.moveTo(prevX, prevY);
-          ctx.lineTo(nx, ny);
+          ctx.lineTo(wp.x, wp.y);
           ctx.stroke();
-          prevX = nx;
-          prevY = ny;
+          prevX = wp.x;
+          prevY = wp.y;
         }
       }
-
-      // 黄点只画一次：用第一个单位的队列目标位置（index 0 无阵型偏移，即原始点击位置）
-      const leader = selectedWithQueue[0];
-      let dotPrevX = leader.x - camera.x;
-      let dotPrevY = leader.y - camera.y;
-      if (leader.target) {
-        dotPrevX = leader.target.x - camera.x;
-        dotPrevY = leader.target.y - camera.y;
-      } else if (leader.state === 'attack' && leader.attackTarget) {
-        const at = entities.find(t => t.id === leader.attackTarget);
-        if (at) { dotPrevX = at.x - camera.x; dotPrevY = at.y - camera.y; }
-      } else if (leader.state === 'gather' && leader.gatherTarget) {
-        dotPrevX = leader.gatherTarget.gx * CELL + CELL / 2 - camera.x;
-        dotPrevY = leader.gatherTarget.gy * CELL + CELL / 2 - camera.y;
-      } else if (leader.state === 'build' && leader.buildTarget) {
-        const bt = entities.find(b => b.id === leader.buildTarget);
-        if (bt) { dotPrevX = bt.x - camera.x; dotPrevY = bt.y - camera.y; }
-      }
-
+      // 黄点画在每个路标位置（复用waypoints数组）
       ctx.fillStyle = '#ff0';
-      for (const cmd of leader.actionQueue) {
-        let nx, ny;
-        if (cmd.type === 'move') {
-          nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
-          ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
-        } else if (cmd.type === 'attack') {
-          const at = entities.find(t => t.id === cmd.targetId);
-          if (!at) continue;
-          nx = at.x - camera.x; ny = at.y - camera.y;
-        } else if (cmd.type === 'gather') {
-          nx = cmd.gatherTarget.gx * CELL + CELL / 2 - camera.x;
-          ny = cmd.gatherTarget.gy * CELL + CELL / 2 - camera.y;
-        } else if (cmd.type === 'build') {
-          const bt = entities.find(b => b.id === cmd.buildTargetId);
-          if (!bt) continue;
-          nx = bt.x - camera.x; ny = bt.y - camera.y;
-        } else { continue; }
-
+      for (const wp of waypoints) {
         ctx.beginPath();
-        ctx.arc(nx, ny, 4, 0, Math.PI * 2);
+        ctx.arc(wp.x, wp.y, 4, 0, Math.PI * 2);
         ctx.fill();
       }
 
