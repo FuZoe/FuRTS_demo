@@ -502,7 +502,7 @@ function update() {
             e.carrying = 0;
             e.gatherTimer = 0;
             e.path = [];
-            const mineral = findNearestMineral(e.gx, e.gy);
+            const mineral = findNextGatherTarget(e);
             if (mineral) {
               e.gatherTarget = mineral;
               setUnitPath(e, mineral.gx, mineral.gy);
@@ -519,7 +519,7 @@ function update() {
               if (e.path.length === 0) moveToward(e, base.x, base.y, speed);
             }
           }
-        } else if (e.gatherTarget) {
+        } else if (hasMineral(e.gatherTarget)) {
           const tx = e.gatherTarget.gx * CELL + CELL / 2;
           const ty = e.gatherTarget.gy * CELL + CELL / 2;
           const d = Math.sqrt((e.x - tx) ** 2 + (e.y - ty) ** 2);
@@ -543,7 +543,14 @@ function update() {
             }
           }
         } else {
-          transitionToIdle(e);
+          const mineral = findNextGatherTarget(e);
+          if (mineral) {
+            e.gatherTarget = mineral;
+            e.gatherTimer = 0;
+            setUnitPath(e, mineral.gx, mineral.gy);
+          } else {
+            transitionToIdle(e);
+          }
         }
         break;
       }

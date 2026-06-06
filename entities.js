@@ -124,6 +124,15 @@ function findNearestMineral(fromX, fromY) {
   return best;
 }
 
+function hasMineral(target) {
+  return !!target && mapLayers.resource[target.gy]?.[target.gx] === 1;
+}
+
+function findNextGatherTarget(unit) {
+  if (hasMineral(unit.gatherTarget)) return unit.gatherTarget;
+  return findNearestMineral(unit.gx, unit.gy);
+}
+
 function findNearestBase(fromX, fromY, team) {
   let best = null, bestDist = Infinity;
   for (const e of entities) {
