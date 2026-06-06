@@ -311,7 +311,18 @@ function setupGameForMap(mapDef) {
   game.currentMapId = mapDef.id;
 
   let playerBase;
-  if (mapDef.id === 'dead_of_night') {
+  if (mapDef.id === 'war_canyon') {
+    // 战争峡谷：玩家左下，敌方右上，双方靠峡谷和侧翼路线争夺中立矿。
+    playerBase = createBuilding('base', 4, 33, TEAM_PLAYER);
+    createUnit('worker', 7, 34, TEAM_PLAYER);
+    createUnit('worker', 7, 36, TEAM_PLAYER);
+    createUnit('worker', 10, 34, TEAM_PLAYER);
+    createBuilding('base', 54, 3, TEAM_ENEMY);
+    createUnit('worker', 51, 4, TEAM_ENEMY);
+    createUnit('worker', 51, 6, TEAM_ENEMY);
+    createUnit('soldier', 49, 5, TEAM_ENEMY);
+    addLog('⚔️ 「战争峡谷」开始！控制中央峡谷，争夺两侧矿区。');
+  } else if (mapDef.id === 'dead_of_night') {
     // 玩家基地居中 (80×60 地图)，基地占 2×2 格子，中心放在 (38, 28)
     playerBase = createBuilding('base', 38, 28, TEAM_PLAYER);
     createUnit('worker', 36, 32, TEAM_PLAYER);
