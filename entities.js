@@ -55,6 +55,7 @@ function createUnit(type, gx, gy, team) {
     gatherTimer: 0,
     path: [],
     pathRetryFrame: 0,
+    actionQueue: [],
   };
   entities.push(e);
   return e;
