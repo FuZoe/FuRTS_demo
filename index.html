@@ -502,7 +502,7 @@ function update() {
             e.carrying = 0;
             e.gatherTimer = 0;
             e.path = [];
-            const mineral = findNearestMineral(e.gx, e.gy);
+            const mineral = findLeastLoadedMineral(e.gx, e.gy);
             if (mineral) {
               e.gatherTarget = mineral;
               setUnitPath(e, mineral.gx, mineral.gy);
@@ -654,6 +654,23 @@ function updateFog() {
 }
 
 // 注: 初始视野计算移到 setupGameForMap() 中，在地图初始化之后才执行
+
+// 判断敌方实体当前是否对玩家可见 (用于渲染过滤 + 指令目标过滤)
+// 与渲染逻辑保持一致: 建筑取中心格, 单位取脚下格
+function isEnemyVisibleToPlayer(e) {
+  if (!window.fogEnabled) return true;
+  if (e.team !== TEAM_ENEMY) return true;
+  let cgx, cgy;
+  if (e.kind === 'building') {
+    const bDef = BUILDING_DEFS[e.type];
+    cgx = e.gx + Math.floor(bDef.w / 2);
+    cgy = e.gy + Math.floor(bDef.h / 2);
+  } else {
+    cgx = Math.floor(e.x / CELL);
+    cgy = Math.floor(e.y / CELL);
+  }
+  return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
+}
 
 // ---- 敌方AI ----
 function enemyAI() {
@@ -859,19 +876,8 @@ function render() {
 
     if (sx < -CELL * 3 || sx > canvas.width + CELL * 3 || sy < -CELL * 3 || sy > canvas.height + CELL * 3) continue;
 
-    // 战争迷雾: 敌方实体仅在视野格内才渲染 (建筑取中心格判断)
-    if (e.team === TEAM_ENEMY) {
-      let cgx, cgy;
-      if (e.kind === 'building') {
-        const bDef = BUILDING_DEFS[e.type];
-        cgx = e.gx + Math.floor(bDef.w / 2);
-        cgy = e.gy + Math.floor(bDef.h / 2);
-      } else {
-        cgx = Math.floor(e.x / CELL);
-        cgy = Math.floor(e.y / CELL);
-      }
-      if (fogMap[cgy]?.[cgx] !== FOG_VISIBLE) continue;
-    }
+    // 战争迷雾: 敌方实体仅在视野格内才渲染
+    if (!isEnemyVisibleToPlayer(e)) continue;
 
     if (e.kind === 'building') {
       const bDef = BUILDING_DEFS[e.type];
@@ -1177,11 +1183,7 @@ function renderMinimap() {
   // 实体: 玩家实体始终显示, 敌方实体仅在 VISIBLE 格内显示
   for (const e of entities) {
     if (e.hp <= 0) continue;
-    if (e.team === TEAM_ENEMY && window.fogEnabled) {
-      const cgx = Math.floor(e.x / CELL);
-      const cgy = Math.floor(e.y / CELL);
-      if (fogMap[cgy]?.[cgx] !== FOG_VISIBLE) continue;
-    }
+    if (!isEnemyVisibleToPlayer(e)) continue;
     const ex = (e.x / CELL) * sx;
     const ey = (e.y / CELL) * sy;
     if (e.team === TEAM_PLAYER) {
@@ -1710,7 +1712,11 @@ function issueCommand(mx, my, isShiftHeld = false) {
 
   if (selectedUnits.length === 0) return;
 
-  const target = entityAt(gx, gy);
+  const rawTarget = entityAt(gx, gy);
+  // 战争迷雾: 不可见的敌方实体不能被右键直接命中 (防止依靠记忆攻击迷雾下的建筑/单位)
+  const target = (rawTarget && rawTarget.team === TEAM_ENEMY && !isEnemyVisibleToPlayer(rawTarget))
+    ? null
+    : rawTarget;
 
   // 构建指令对象
   let command = null;
@@ -1726,6 +1732,19 @@ function issueCommand(mx, my, isShiftHeld = false) {
     addLog(isShiftHeld ? '🔨 排队建造' : '🔨 前往建造');
   } else {
     command = { type: 'move', targetGrid: { gx, gy } };
+  }
+
+  // 采矿指令立即执行时，使用分散采矿逻辑（工人均匀分配到不同矿格）
+  if (command.type === 'gather' && !isShiftHeld) {
+    const workers = selectedUnits.filter(u => u.type === 'worker');
+    if (workers.length > 0) {
+      const mineralCells = findMineralPatchCells(gx, gy);
+      if (mineralCells.length > 0) {
+        for (const w of workers) { w.actionQueue = []; }
+        distributeWorkersToMinerals(workers, mineralCells);
+      }
+    }
+    return;
   }
 
   const count = selectedUnits.length;
