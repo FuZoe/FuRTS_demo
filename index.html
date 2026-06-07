@@ -1311,6 +1311,10 @@ function handleGroupBarRightClick(e, num) {
   }
 }
 
+function isStopCommandTarget(entity) {
+  return entity && entity.kind === 'unit' && entity.team === TEAM_PLAYER;
+}
+
 function updateSidebar() {
   updateGuide();
   updateGroupBar();
@@ -1395,7 +1399,9 @@ function updateSidebar() {
     }
 
     let btns = '';
-    btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[S]</span> Stop</button>`;
+    if (selectedEntities.some(isStopCommandTarget)) {
+      btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[S]</span> 停止</button>`;
+    }
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
       const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
@@ -1689,7 +1695,7 @@ function stopSelectedUnits() {
 
   for (const id of game.selected) {
     const unit = entities.find(e => e.id === id);
-    if (!unit || unit.kind !== 'unit' || unit.team !== TEAM_PLAYER) continue;
+    if (!isStopCommandTarget(unit)) continue;
 
     unit.state = 'idle';
     unit.actionQueue = [];
@@ -1704,7 +1710,7 @@ function stopSelectedUnits() {
   }
 
   if (stopped > 0) {
-    addLog('Stop');
+    addLog('停止');
     updateSidebar();
   }
 
@@ -1889,10 +1895,9 @@ window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
 
   if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-    const hasPlayerUnits = game.selected.some(id => {
-      const unit = entities.find(en => en.id === id);
-      return unit && unit.kind === 'unit' && unit.team === TEAM_PLAYER;
-    });
+    const hasPlayerUnits = game.selected
+      .map(id => entities.find(en => en.id === id))
+      .some(isStopCommandTarget);
 
     if (hasPlayerUnits) {
       e.preventDefault();
