@@ -246,6 +246,56 @@ function initDeadOfNightMap() {
 }
 
 // ============================================================
+//  战争峡谷 (War Canyon) - 60×40 1v1 对称竞技地图
+//  玩家左下 vs 敌方右上, 中央水域切割战场, 峡谷控制决定进攻路线。
+// ============================================================
+function initWarCanyonMap() {
+  setMapDimensions(60, 40);
+  initMapLayers();
+  initFogMap();
+
+  // 中央峡谷：水域包围, 中央留出狭长通道。
+  placeTerrainRect(25, 0, 2, 17, TERRAIN_WATER);
+  placeTerrainRect(25, 23, 2, 17, TERRAIN_WATER);
+  placeTerrainRect(33, 0, 2, 17, TERRAIN_WATER);
+  placeTerrainRect(33, 23, 2, 17, TERRAIN_WATER);
+
+  // 峡谷两侧高地, 远程单位可在两翼获得射程优势。
+  placeTerrainRect(22, 15, 3, 10, TERRAIN_HILL);
+  placeTerrainRect(35, 15, 3, 10, TERRAIN_HILL);
+
+  // 清理双方基地与核心通道, 保证开局和通行性。
+  placeTerrainRect(2, 30, 12, 9, TERRAIN_GRASS);
+  placeTerrainRect(46, 1, 12, 9, TERRAIN_GRASS);
+  placeTerrainRect(27, 17, 6, 6, TERRAIN_GRASS);
+
+  // 中央争夺区减速带。
+  placeTerrainPatch(29, 20, 2, TERRAIN_SAND);
+
+  // 玩家方矿区。
+  placeMineralRect(8, 35, 4, 3);    // 主矿
+  placeMineralRect(11, 27, 4, 2);   // 自然扩张
+
+  // 敌方矿区（对称）。
+  placeMineralRect(48, 2, 4, 3);
+  placeMineralRect(45, 11, 4, 2);
+
+  // 中立矿区（峡谷内争夺点）。
+  placeMineralRect(28, 18, 2, 2);
+  placeMineralRect(30, 21, 2, 2);
+
+  // 随机岩石只放在峡谷两肩, 避免堵死 3 格核心通道。
+  for (let i = 0; i < 15; i++) {
+    const rx = 27 + Math.floor(Math.random() * 6);
+    const ry = 17 + Math.floor(Math.random() * 6);
+    const inCorePassage = rx >= 29 && rx <= 31 && ry >= 17 && ry <= 22;
+    if (!inCorePassage && mapLayers.terrain[ry][rx] === TERRAIN_GRASS && mapLayers.resource[ry][rx] === 0) {
+      mapLayers.obstacle[ry][rx] = 1;
+    }
+  }
+}
+
+// ============================================================
 //  地图注册表
 // ============================================================
 const MAP_REGISTRY = [
@@ -264,5 +314,13 @@ const MAP_REGISTRY = [
     mapW: 80,
     mapH: 60,
     initFn: initDeadOfNightMap,
+  },
+  {
+    id: 'war_canyon',
+    name: '战争峡谷',
+    desc: '中央峡谷对称地图，控制通道即控制战局',
+    mapW: 60,
+    mapH: 40,
+    initFn: initWarCanyonMap,
   },
 ];
