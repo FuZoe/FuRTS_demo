@@ -2346,7 +2346,10 @@ window.addEventListener('keydown', (e) => {
   }
 
   if (e.key === 'Escape') {
-    if (game.buildMode) {
+    if (game.commandMode) {
+      game.commandMode = null;
+      updateSidebar();
+    } else if (game.buildMode) {
       cancelBuild();
     } else {
       const selectedBuilding = game.selected
