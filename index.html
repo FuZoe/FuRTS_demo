@@ -411,6 +411,7 @@ function update() {
         const enemy = findNearestEnemy(e, 6);
         if (enemy && game.frame % 30 === 0) {
           enemy.hp -= 20;
+          enemy.lastHitFrame = game.frame;
           if (enemy.hp <= 0) addLog(`防御塔消灭了 ${UNIT_DEFS[enemy.type]?.char || '敌人'}`);
         }
       }
@@ -489,6 +490,7 @@ function update() {
           e.path = [];
           if (game.frame % 20 === 0) {
             target.hp -= def.atk;
+            target.lastHitFrame = game.frame;
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
@@ -906,7 +908,7 @@ function render() {
       ctx.strokeStyle = e.team === TEAM_PLAYER ? '#0a0' : '#a00';
       ctx.strokeRect(bx, by, bw, bh);
 
-      const bColor = e.team === TEAM_PLAYER ? bDef.color : '#f44';
+      const bColor = isHitFlashActive(e) ? '#f00' : (e.team === TEAM_PLAYER ? bDef.color : '#f44');
       ctx.fillStyle = bColor;
       ctx.font = `bold ${CELL}px Courier New`;
       ctx.textAlign = 'center';
@@ -926,12 +928,12 @@ function render() {
         ctx.fillRect(bx, by + bh + 2, bw * pct, 4);
       }
 
-      drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, e.team);
+      drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, game.selected.includes(e.id));
     } else {
       const uDef = UNIT_DEFS[e.type];
       // 丧尸系单位保留自身的暗色，便于与普通敌军区分
       const isZombieType = e.type === 'zombie' || e.type === 'berserker' || e.type === 'bloater';
-      const uColor = e.team === TEAM_PLAYER ? uDef.color : (isZombieType ? uDef.color : '#f44');
+      const uColor = isHitFlashActive(e) ? '#f00' : (e.team === TEAM_PLAYER ? uDef.color : (isZombieType ? uDef.color : '#f44'));
 
       if (game.selected.includes(e.id)) {
         ctx.strokeStyle = '#fff';
@@ -982,7 +984,7 @@ function render() {
         ctx.fillText('🔨', sx + 10, sy + 10);
       }
 
-      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, e.team);
+      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, game.selected.includes(e.id));
     }
   }
 
@@ -1151,13 +1153,25 @@ function render() {
   renderMinimap();
 }
 
-function drawHpBar(x, y, w, hp, maxHp, team) {
-  if (hp >= maxHp) return;
+function isHitFlashActive(e) {
+  return e.lastHitFrame && game.frame - e.lastHitFrame < 10 && game.frame % 4 < 2;
+}
+
+function drawHpBar(x, y, w, hp, maxHp, isSelected = false) {
+  if (hp >= maxHp && !isSelected) return;
   const pct = hp / maxHp;
+  const h = isSelected ? 10 : 3;
   ctx.fillStyle = '#300';
-  ctx.fillRect(x, y, w, 3);
+  ctx.fillRect(x, y, w, h);
   ctx.fillStyle = pct > 0.5 ? '#0f0' : pct > 0.25 ? '#ff0' : '#f00';
-  ctx.fillRect(x, y, w * pct, 3);
+  ctx.fillRect(x, y, w * pct, h);
+  if (isSelected) {
+    ctx.fillStyle = pct > 0.25 ? '#000' : '#fff';
+    ctx.font = 'bold 8px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${Math.max(0, hp)}/${maxHp}`, x + w / 2, y + h / 2);
+  }
 }
 
 function renderMinimap() {
