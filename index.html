@@ -1359,18 +1359,29 @@ function updateSidebar() {
       infoEl.innerHTML = html;
 
       let btns = '';
+      const productionBuildings = getSelectedProductionBuildings();
+      const hasBase = productionBuildings.some(b => b.type === 'base');
+      const hasBarracks = productionBuildings.some(b => b.type === 'barracks');
+      const hasFactory = productionBuildings.some(b => b.type === 'factory');
       const producibleTypes = new Set();
-      for (const b of getSelectedProductionBuildings()) {
+      for (const b of productionBuildings) {
         const bDef = BUILDING_DEFS[b.type];
         if (!bDef.produces) continue;
         for (const uType of bDef.produces) producibleTypes.add(uType);
       }
-      const keyMap = { worker: '1', soldier: '1', ranger: '2', tank: '3' };
+      const keyForUnit = (uType) => {
+        if (uType === 'worker' && hasBase) return '1';
+        if (uType === 'soldier' && !hasBase && hasBarracks) return '1';
+        if (uType === 'ranger' && hasBarracks) return '2';
+        if (uType === 'tank' && hasFactory) return '3';
+        return '';
+      };
       for (const uType of producibleTypes) {
         const uDef = UNIT_DEFS[uType];
-        const key = keyMap[uType] || '';
+        const key = keyForUnit(uType);
+        const keyLabel = key ? `<span class="btn-key">[${key}]</span> ` : '';
         btns += `<button class="btn" onclick="trainUnit('${uType}')">
-          <span class="btn-key">[${key}]</span> ${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
+          ${keyLabel}${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
         </button>`;
       }
       actionsEl.innerHTML = btns;
