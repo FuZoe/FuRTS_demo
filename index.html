@@ -515,6 +515,10 @@ function update() {
         if (e.path.length > 0) {
           const arrived = followPath(e, speed);
           if (arrived) {
+            if (e.actionQueue.length > 0) {
+              transitionToIdle(e);
+              break;
+            }
             e.patrolToB = !e.patrolToB;
             const next = e.patrolToB ? e.patrolPointB : e.patrolPointA;
             if (next) setUnitPath(e, Math.floor(next.x / CELL), Math.floor(next.y / CELL));
@@ -524,6 +528,10 @@ function update() {
           const tgy = Math.floor(dest.y / CELL);
           setUnitPath(e, tgx, tgy);
           if (e.path.length === 0 && moveToward(e, dest.x, dest.y, speed)) {
+            if (e.actionQueue.length > 0) {
+              transitionToIdle(e);
+              break;
+            }
             e.patrolToB = !e.patrolToB;
           }
         }
