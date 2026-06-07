@@ -681,7 +681,7 @@ function getAIPhase() {
 }
 
 function getAIPhaseName(phase) {
-  return ['economy', 'harass', 'buildup', 'all-out'][phase] || 'unknown';
+  return ['经济扩张', '骚扰', '集结', '总攻'][phase] || '未知';
 }
 
 function countAITotalPop(enemyUnits, enemyBuildings) {
@@ -743,7 +743,7 @@ function aiBuildNearBase(base, type, enemyBuildings) {
   aiState.minerals -= def.cost;
   const building = createBuilding(type, spot.gx, spot.gy, TEAM_ENEMY);
   building.buildProgress = building.maxHp;
-  addLog(`Enemy built ${def.desc}`);
+  addLog(`敌方建造完成: ${def.desc}`);
   return true;
 }
 
@@ -770,6 +770,9 @@ function getAIFlankPoint(routeIndex, target) {
 }
 
 function commandAIMove(unit, point) {
+  const targetX = point.gx * CELL + CELL / 2;
+  const targetY = point.gy * CELL + CELL / 2;
+  if (unit.state === 'move' && unit.target?.x === targetX && unit.target?.y === targetY) return;
   applyCommand(unit, { type: 'move', targetGrid: point });
 }
 
@@ -795,7 +798,7 @@ function enemyAI() {
   const phase = getAIPhase();
   if (aiState.lastPhase !== phase) {
     aiState.lastPhase = phase;
-    addLog(`Enemy AI phase: ${getAIPhaseName(phase)}`);
+    addLog(`敌方 AI 阶段: ${getAIPhaseName(phase)}`);
   }
 
   const enemyUnits = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'unit');
@@ -807,8 +810,6 @@ function enemyAI() {
   const enemyArmy = enemyUnits.filter(u => u.type !== 'worker');
   const completedBuildings = enemyBuildings.filter(b => b.buildProgress >= b.maxHp);
   const popInfo = countAITotalPop(enemyUnits, enemyBuildings);
-
-  aiState.minerals += Math.max(1, enemyWorkers.length);
 
   for (const w of enemyWorkers) {
     if (w.state === 'idle') {
@@ -857,7 +858,7 @@ function enemyAI() {
       aiState.lastHarassFrame = game.frame;
       aiState.attackRoute++;
       harassers.forEach((u, i) => commandAIAttack(u, target, aiState.attackRoute + i));
-      addLog('Enemy harass squad is attacking the mining line');
+      addLog('敌方骚扰小队正在攻击矿区');
     }
   }
 
@@ -869,7 +870,7 @@ function enemyAI() {
       aiState.lastAllOutFrame = game.frame;
       aiState.attackRoute++;
       attackers.forEach((u, i) => commandAIAttack(u, target, aiState.attackRoute + i));
-      addLog('Enemy launches a full-scale attack');
+      addLog('敌军发起全面进攻');
     }
   }
 }
