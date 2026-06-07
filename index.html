@@ -287,6 +287,13 @@ function clampCamera() {
   camera.y = Math.max(0, Math.min(camera.y, maxY));
 }
 
+function clampGrid(gx, gy) {
+  return {
+    gx: Math.max(0, Math.min(MAP_W - 1, gx)),
+    gy: Math.max(0, Math.min(MAP_H - 1, gy)),
+  };
+}
+
 // ---- 游戏状态 ----
 const game = {
   minerals: 200,
@@ -1744,7 +1751,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
       if (command.type === 'move') {
         const row = Math.floor(i / cols);
         const col = i % cols;
-        cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+        cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
       }
       u.actionQueue = [];
       applyCommand(u, cmd);
@@ -1761,8 +1768,7 @@ function minimapEventToPosition(e) {
   return {
     worldX,
     worldY,
-    gx: Math.max(0, Math.min(MAP_W - 1, Math.floor(worldX / CELL))),
-    gy: Math.max(0, Math.min(MAP_H - 1, Math.floor(worldY / CELL))),
+    ...clampGrid(Math.floor(worldX / CELL), Math.floor(worldY / CELL)),
   };
 }
 
@@ -1796,7 +1802,7 @@ mmCanvas.addEventListener('contextmenu', (e) => {
     } else {
       const row = Math.floor(i / cols);
       const col = i % cols;
-      const cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+      const cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
       u.actionQueue = [];
       applyCommand(u, cmd);
     }
