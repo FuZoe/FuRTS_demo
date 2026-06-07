@@ -264,32 +264,32 @@ function initWarCanyonMap() {
   placeTerrainRect(22, 15, 3, 10, TERRAIN_HILL);
   placeTerrainRect(35, 15, 3, 10, TERRAIN_HILL);
 
-  // 中央争夺区减速带。
-  placeTerrainPatch(29, 20, 2, TERRAIN_SAND);
-
   // 清理双方基地与核心通道, 保证开局和通行性。
   placeTerrainRect(2, 30, 12, 9, TERRAIN_GRASS);
   placeTerrainRect(46, 1, 12, 9, TERRAIN_GRASS);
   placeTerrainRect(27, 17, 6, 6, TERRAIN_GRASS);
 
+  // 中央争夺区减速带。
+  placeTerrainPatch(29, 20, 2, TERRAIN_SAND);
+
   // 玩家方矿区。
-  placeMineral(5, 35, 12);   // 主矿
-  placeMineral(12, 28, 8);   // 自然扩张
+  placeMineralRect(8, 35, 4, 3);    // 主矿
+  placeMineralRect(11, 27, 4, 2);   // 自然扩张
 
   // 敌方矿区（对称）。
-  placeMineral(54, 5, 12);
-  placeMineral(48, 12, 8);
+  placeMineralRect(48, 2, 4, 3);
+  placeMineralRect(45, 11, 4, 2);
 
   // 中立矿区（峡谷内争夺点）。
-  placeMineral(29, 18, 6);
-  placeMineral(29, 22, 6);
+  placeMineralRect(28, 18, 2, 2);
+  placeMineralRect(30, 21, 2, 2);
 
   // 随机岩石只放在峡谷两肩, 避免堵死 3 格核心通道。
   for (let i = 0; i < 15; i++) {
     const rx = 27 + Math.floor(Math.random() * 6);
     const ry = 17 + Math.floor(Math.random() * 6);
     const inCorePassage = rx >= 29 && rx <= 31 && ry >= 17 && ry <= 22;
-    if (!inCorePassage && mapLayers.terrain[ry][rx] === TERRAIN_GRASS) {
+    if (!inCorePassage && mapLayers.terrain[ry][rx] === TERRAIN_GRASS && mapLayers.resource[ry][rx] === 0) {
       mapLayers.obstacle[ry][rx] = 1;
     }
   }
