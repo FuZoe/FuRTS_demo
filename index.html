@@ -252,6 +252,7 @@ body {
 
 <script src="map.js"></script>
 <script src="entities.js"></script>
+<script src="audio.js"></script>
 <script src="hotkeys.js"></script>
 <script>
 // ============================================================
@@ -416,6 +417,7 @@ function update() {
         if (enemy && game.frame % 30 === 0) {
           enemy.hp -= 20;
           enemy.lastHitFrame = game.frame;
+          if (e.team === TEAM_PLAYER || enemy.team === TEAM_PLAYER) AudioManager.attack();
           if (enemy.hp <= 0) addLog(`防御塔消灭了 ${UNIT_DEFS[enemy.type]?.char || '敌人'}`);
         }
       }
@@ -431,7 +433,10 @@ function update() {
           applyRallyPoint(e, newUnit);
           e.queue.shift();
           e.queueTimer = 0;
-          if (e.team === TEAM_PLAYER) addLog(`生产完成: ${def.desc}`);
+          if (e.team === TEAM_PLAYER) {
+            addLog(`生产完成: ${def.desc}`);
+            AudioManager.unitReady();
+          }
         }
       }
       continue;
@@ -495,6 +500,7 @@ function update() {
           if (game.frame % 20 === 0) {
             target.hp -= def.atk;
             target.lastHitFrame = game.frame;
+            if (e.team === TEAM_PLAYER || target.team === TEAM_PLAYER) AudioManager.attack();
             if (target.hp <= 0) {
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
@@ -583,9 +589,11 @@ function update() {
           }
         } else {
           e.path = [];
+          const wasIncomplete = building.buildProgress < building.maxHp;
           building.buildProgress = Math.min(building.maxHp, building.buildProgress + 2);
-          if (building.buildProgress >= building.maxHp) {
+          if (wasIncomplete && building.buildProgress >= building.maxHp) {
             addLog(`建筑完成: ${BUILDING_DEFS[building.type].desc}`);
+            if (building.team === TEAM_PLAYER) AudioManager.build();
             e.buildTarget = null;
             transitionToIdle(e);
           }
@@ -1456,8 +1464,8 @@ function trainUnit(type, buildingId) {
   const building = entities.find(e => e.id === buildingId);
   if (!building) return;
   const uDef = UNIT_DEFS[type];
-  if (game.minerals < uDef.cost) { addLog('矿石不足！'); return; }
-  if (game.pop + uDef.popCost > game.maxPop) { addLog('人口上限！需要建造人口房。'); return; }
+  if (game.minerals < uDef.cost) { addLog('矿石不足！'); AudioManager.error(); return; }
+  if (game.pop + uDef.popCost > game.maxPop) { addLog('人口上限！需要建造人口房。'); AudioManager.error(); return; }
   game.minerals -= uDef.cost;
   building.queue.push(type);
   addLog(`开始生产: ${uDef.desc}`);
@@ -1466,7 +1474,7 @@ function trainUnit(type, buildingId) {
 
 function startBuild(type) {
   const bDef = BUILDING_DEFS[type];
-  if (game.minerals < bDef.cost) { addLog('矿石不足！'); return; }
+  if (game.minerals < bDef.cost) { addLog('矿石不足！'); AudioManager.error(); return; }
   game.buildMode = type;
   addLog(`进入建造模式: ${bDef.desc} - 左键放置`);
   updateSidebar();
@@ -1482,10 +1490,11 @@ function placeBuildingAtMouse(gx, gy) {
   if (!game.buildMode) return;
   if (!canPlaceBuilding(game.buildMode, gx, gy)) {
     addLog('无法在此处建造！');
+    AudioManager.error();
     return;
   }
   const bDef = BUILDING_DEFS[game.buildMode];
-  if (game.minerals < bDef.cost) { addLog('矿石不足！'); return; }
+  if (game.minerals < bDef.cost) { addLog('矿石不足！'); AudioManager.error(); return; }
   game.minerals -= bDef.cost;
   const building = createBuilding(game.buildMode, gx, gy, TEAM_PLAYER);
 
@@ -1586,6 +1595,7 @@ canvas.addEventListener('mouseup', (e) => {
     }
     game.dragStart = null;
     game.dragEnd = null;
+    if (game.selected.length > 0) AudioManager.select();
     updateSidebar();
   }
 });
@@ -1796,6 +1806,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
       b.rallyPoint = { gx, gy, type: rpType };
     }
     addLog(isMineral ? '集结点设为矿区 ⛏️' : '集结点已设置 🚩');
+    AudioManager.move();
     updateSidebar();
     return;
   }
@@ -1863,6 +1874,10 @@ function issueCommand(mx, my, isShiftHeld = false) {
       applyCommand(u, cmd);
     }
   });
+
+  if (command.type === 'move' || command.type === 'gather' || command.type === 'build') {
+    AudioManager.move();
+  }
 }
 
 function minimapEventToPosition(e) {
