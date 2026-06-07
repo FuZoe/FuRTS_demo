@@ -493,7 +493,7 @@ function update() {
         break;
       }
       case 'hold': {
-        const nearby = findNearestEnemy(e, def.range);
+        const nearby = findNearestHoldTarget(e, def.range);
         if (nearby && dist(e, nearby) <= def.range * CELL && game.frame % 20 === 0) {
           nearby.hp -= def.atk;
           if (nearby.hp <= 0) {
@@ -682,6 +682,21 @@ function isEnemyVisibleToPlayer(e) {
     cgy = Math.floor(e.y / CELL);
   }
   return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
+}
+
+function findNearestHoldTarget(unit, range) {
+  let best = null, bestDist = Infinity;
+  const rangePx = range * CELL;
+  for (const e of entities) {
+    if (e.hp <= 0 || e.team === unit.team) continue;
+    if (unit.team === TEAM_PLAYER && e.team === TEAM_ENEMY && !isEnemyVisibleToPlayer(e)) continue;
+    const d = dist(unit, e);
+    if (d < rangePx && d < bestDist) {
+      bestDist = d;
+      best = e;
+    }
+  }
+  return best;
 }
 
 // ---- 敌方AI ----
@@ -1932,7 +1947,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (e.key.toLowerCase() === 'h' && game.selected.length > 0) {
+  if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.altKey && !e.metaKey && game.selected.length > 0) {
     e.preventDefault();
     let heldCount = 0;
     for (const id of game.selected) {
