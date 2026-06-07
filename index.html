@@ -552,6 +552,8 @@ function update() {
             if (e.team === TEAM_PLAYER) {
               game.minerals += e.carrying;
               game.stats.mineralsGathered += e.carrying;
+            } else if (game.currentMapId !== 'dead_of_night') {
+              window.aiState.minerals += e.carrying;
             }
             e.carrying = 0;
             e.gatherTimer = 0;
@@ -738,74 +740,6 @@ function isEnemyVisibleToPlayer(e) {
     cgy = Math.floor(e.y / CELL);
   }
   return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
-}
-
-// ---- 敌方AI ----
-function enemyAI() {
-  if (game.currentMapId === 'dead_of_night') {
-    enemyAIDeadOfNight();
-    return;
-  }
-  const enemyUnits = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'unit');
-  const enemyBuildings = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'building');
-  const eBase = enemyBuildings.find(b => b.type === 'base');
-
-  if (!eBase) return;
-
-  const enemyWorkers = enemyUnits.filter(u => u.type === 'worker');
-  const enemySoldiers = enemyUnits.filter(u => u.type !== 'worker');
-
-  // 工人去采矿
-  for (const w of enemyWorkers) {
-    if (w.state === 'idle') {
-      const mineral = findNearestMineral(w.gx, w.gy);
-      if (mineral) {
-        w.gatherTarget = mineral;
-        w.state = 'gather';
-        setUnitPath(w, mineral.gx, mineral.gy);
-      }
-    }
-  }
-
-  // 定期生产
-  if (eBase.queue.length === 0 && eBase.buildProgress >= eBase.maxHp) {
-    if (enemyWorkers.length < 3) {
-      eBase.queue.push('worker');
-    }
-  }
-
-  // 有兵营则生产战斗单位
-  const eBarracks = enemyBuildings.find(b => b.type === 'barracks' && b.buildProgress >= b.maxHp);
-  if (eBarracks && eBarracks.queue.length === 0) {
-    eBarracks.queue.push(Math.random() < 0.5 ? 'soldier' : 'ranger');
-  }
-
-  // 建造兵营
-  if (!enemyBuildings.find(b => b.type === 'barracks') && game.frame > 600) {
-    const bx = eBase.gx + 4;
-    const by = eBase.gy;
-    if (bx + 1 < MAP_W && by + 1 < MAP_H) {
-      const b = createBuilding('barracks', bx, by, TEAM_ENEMY);
-      b.buildProgress = b.maxHp;
-    }
-  }
-
-  // 进攻逻辑
-  if (enemySoldiers.length >= 3) {
-    const playerBuildings = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0);
-    if (playerBuildings.length > 0) {
-      const target = playerBuildings[0];
-      for (const s of enemySoldiers) {
-        if (s.state === 'idle') {
-          s.attackTarget = target.id;
-          s.state = 'attack';
-          s.path = [];
-          s.pathRetryFrame = 0;
-        }
-      }
-      if (game.frame % 600 === 0) addLog('⚠️ 敌军发起进攻！');
-    }
-  }
 }
 
 // 「亡者之夜」专属敌方 AI:
@@ -2390,5 +2324,6 @@ function startGame(mapId) {
 // 开局展示地图选择界面
 showMapSelection();
 </script>
+<script src="enemy_ai.js"></script>
 </body>
 </html>
