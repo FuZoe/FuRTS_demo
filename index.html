@@ -342,7 +342,18 @@ function setupGameForMap(mapDef) {
   game.currentMapId = mapDef.id;
 
   let playerBase;
-  if (mapDef.id === 'dead_of_night') {
+  if (mapDef.id === 'war_canyon') {
+    // 战争峡谷：玩家左下，敌方右上，双方靠峡谷和侧翼路线争夺中立矿。
+    playerBase = createBuilding('base', 4, 33, TEAM_PLAYER);
+    createUnit('worker', 7, 34, TEAM_PLAYER);
+    createUnit('worker', 7, 36, TEAM_PLAYER);
+    createUnit('worker', 10, 34, TEAM_PLAYER);
+    createBuilding('base', 54, 3, TEAM_ENEMY);
+    createUnit('worker', 52, 4, TEAM_ENEMY);
+    createUnit('worker', 51, 6, TEAM_ENEMY);
+    createUnit('soldier', 49, 5, TEAM_ENEMY);
+    addLog('⚔️ 「战争峡谷」开始！控制中央峡谷，争夺两侧矿区。');
+  } else if (mapDef.id === 'dead_of_night') {
     // 玩家基地居中 (80×60 地图)，基地占 2×2 格子，中心放在 (38, 28)
     playerBase = createBuilding('base', 38, 28, TEAM_PLAYER);
     createUnit('worker', 36, 32, TEAM_PLAYER);
@@ -419,6 +430,36 @@ function countPop() {
   game.maxPop = maxPop;
 }
 
+function getUnitSpawnPoint(building) {
+  const def = BUILDING_DEFS[building.type];
+  const preferred = {
+    gx: building.gx + (building.team === TEAM_PLAYER ? -2 : def.w + 1),
+    gy: building.gy + 1,
+  };
+  if (isWalkable(preferred.gx, preferred.gy) && mapLayers.resource[preferred.gy][preferred.gx] === 0) {
+    return preferred;
+  }
+
+  const minX = building.gx - 1;
+  const maxX = building.gx + def.w;
+  const minY = building.gy - 1;
+  const maxY = building.gy + def.h;
+  let best = null;
+  let bestDist = Infinity;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (x >= building.gx && x < building.gx + def.w && y >= building.gy && y < building.gy + def.h) continue;
+      if (!isWalkable(x, y) || mapLayers.resource[y][x] !== 0) continue;
+      const d = Math.abs(x - preferred.gx) + Math.abs(y - preferred.gy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { gx: x, gy: y };
+      }
+    }
+  }
+  return best || { gx: building.gx, gy: building.gy };
+}
+
 // ---- 更新逻辑 ----
 function update() {
   if (game.paused || game.gameOver) return;
@@ -457,9 +498,8 @@ function update() {
         const producing = e.queue[0];
         const def = UNIT_DEFS[producing];
         if (e.queueTimer >= def.buildTime) {
-          const spawnX = e.gx + (e.team === TEAM_PLAYER ? -2 : 3);
-          const spawnY = e.gy + 1;
-          const newUnit = createUnit(producing, spawnX, spawnY, e.team);
+          const spawn = getUnitSpawnPoint(e);
+          const newUnit = createUnit(producing, spawn.gx, spawn.gy, e.team);
           applyRallyPoint(e, newUnit);
           e.queue.shift();
           e.queueTimer = 0;
@@ -2257,6 +2297,9 @@ function renderMapThumbnail(canvas, mapDef) {
     dot(74, 6, '#f44', 6);   // NE
     dot(6, 54, '#f44', 6);   // SW
     dot(74, 54, '#f44', 6);  // SE
+  } else if (mapDef.id === 'war_canyon') {
+    dot(5, 34, '#0f0', 8);   // 玩家左下基地
+    dot(55, 4, '#f44', 6);   // 敌方右上基地
   } else {
     dot(mapDef.mapW - 5, mapDef.mapH - 5, '#0f0', 8); // 玩家
     dot(4, 4, '#f44', 6); // 敌方
