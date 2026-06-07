@@ -1283,6 +1283,7 @@ function updateGuide() {
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
     if (hasWorker) html += row('右键矿石', '采矿');
+    html += row('S', '停止');
     html += row('Ctrl+数字', '设置编队');
     html += row('Shift+数字', '追加编队');
     html += row('Alt+数字', '独占编队');
@@ -1324,6 +1325,10 @@ function handleGroupBarRightClick(e, num) {
   } else {
     assignControlGroup(num);
   }
+}
+
+function isStopCommandTarget(entity) {
+  return entity && entity.kind === 'unit' && entity.team === TEAM_PLAYER;
 }
 
 function updateSidebar() {
@@ -1410,6 +1415,9 @@ function updateSidebar() {
     }
 
     let btns = '';
+    if (selectedEntities.some(isStopCommandTarget)) {
+      btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[S]</span> 停止</button>`;
+    }
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
       const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
@@ -1725,6 +1733,33 @@ function transitionToIdle(unit) {
   unit.state = 'idle';
 }
 
+function stopSelectedUnits() {
+  let stopped = 0;
+
+  for (const id of game.selected) {
+    const unit = entities.find(e => e.id === id);
+    if (!isStopCommandTarget(unit)) continue;
+
+    unit.state = 'idle';
+    unit.actionQueue = [];
+    unit.path = [];
+    unit.target = null;
+    unit.attackTarget = null;
+    unit.gatherTarget = null;
+    unit.buildTarget = null;
+    unit.gatherTimer = 0;
+    unit.pathRetryFrame = 0;
+    stopped++;
+  }
+
+  if (stopped > 0) {
+    addLog('停止');
+    updateSidebar();
+  }
+
+  return stopped;
+}
+
 function issueCommand(mx, my, isShiftHeld = false) {
   if (game.selected.length === 0) return;
 
@@ -1960,6 +1995,19 @@ function cycleSubGroup() {
 // 键盘
 window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
+
+  if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const hasPlayerUnits = game.selected
+      .map(id => entities.find(en => en.id === id))
+      .some(isStopCommandTarget);
+
+    if (hasPlayerUnits) {
+      e.preventDefault();
+      game.keysDown[e.key] = false;
+      stopSelectedUnits();
+      return;
+    }
+  }
 
   if (e.key === 'Escape') cancelBuild();
 
