@@ -1330,6 +1330,7 @@ function updateGuide() {
     html += '<div class="guide-section">';
     html += row('左键', '放置建筑');
     html += row('右键/Esc', '取消建造');
+    html += row('F1', '选中空闲工人');
     html += '</div>';
     guideEl.innerHTML = html;
     return;
@@ -1347,6 +1348,7 @@ function updateGuide() {
     html += row('Shift+数字', '追加编队');
     html += row('Alt+数字', '独占编队');
     html += row('数字键', '召回编队');
+    html += row('F1', '选中空闲工人');
     html += row('Tab', '子组切换');
     html += row('WASD', '滚动地图');
     html += row('目标', '摧毁左上敌方基地');
@@ -1360,6 +1362,7 @@ function updateGuide() {
 
   if (first.kind === 'building') {
     html += row('左键空地', '取消选中');
+    html += row('F1', '选中空闲工人');
   } else if (first.kind === 'unit') {
     const hasWorker = sel.some(e => e.type === 'worker');
     html += row('右键空地', '移动');
@@ -1369,6 +1372,7 @@ function updateGuide() {
     html += row('Ctrl+数字', '设置编队');
     html += row('Shift+数字', '追加编队');
     html += row('Alt+数字', '独占编队');
+    html += row('F1', '选中空闲工人');
     html += row('Tab', '子组切换');
     html += row('左键空地', '取消选中');
   }
@@ -2075,6 +2079,33 @@ function recallControlGroup(num) {
   return true;
 }
 
+function selectIdleWorkers() {
+  const idleWorkers = entities.filter(e =>
+    e.team === TEAM_PLAYER &&
+    e.hp > 0 &&
+    e.kind === 'unit' &&
+    e.type === 'worker' &&
+    e.state === 'idle'
+  );
+
+  if (idleWorkers.length === 0) {
+    addLog('没有空闲工人');
+    return false;
+  }
+
+  game.selected = idleWorkers.map(w => w.id);
+  game._subGroupType = null;
+  game._fullSelection = null;
+  const cx = idleWorkers.reduce((s, w) => s + w.x, 0) / idleWorkers.length;
+  const cy = idleWorkers.reduce((s, w) => s + w.y, 0) / idleWorkers.length;
+  camera.x = cx - canvas.width / 2;
+  camera.y = cy - canvas.height / 2;
+  clampCamera();
+  addLog(`选中 ${idleWorkers.length} 个空闲工人`);
+  updateSidebar();
+  return true;
+}
+
 // ---- 子组切换 (Tab) ----
 function cycleSubGroup() {
   // Use stored full selection if available (after first Tab), otherwise current selection
@@ -2110,6 +2141,12 @@ function cycleSubGroup() {
 // 键盘
 window.addEventListener('keydown', (e) => {
   game.keysDown[e.key] = true;
+
+  if (e.key === 'F1') {
+    e.preventDefault();
+    selectIdleWorkers();
+    return;
+  }
 
   if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
     const hasPlayerUnits = game.selected
