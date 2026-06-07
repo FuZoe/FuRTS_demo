@@ -1992,6 +1992,9 @@ function renderMapThumbnail(canvas, mapDef) {
     dot(74, 6, '#f44', 6);   // NE
     dot(6, 54, '#f44', 6);   // SW
     dot(74, 54, '#f44', 6);  // SE
+  } else if (mapDef.id === 'war_canyon') {
+    dot(5, 34, '#0f0', 8);   // 玩家左下基地
+    dot(55, 4, '#f44', 6);   // 敌方右上基地
   } else {
     dot(mapDef.mapW - 5, mapDef.mapH - 5, '#0f0', 8); // 玩家
     dot(4, 4, '#f44', 6); // 敌方
