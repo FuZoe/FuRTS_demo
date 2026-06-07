@@ -287,6 +287,13 @@ function clampCamera() {
   camera.y = Math.max(0, Math.min(camera.y, maxY));
 }
 
+function clampGrid(gx, gy) {
+  return {
+    gx: Math.max(0, Math.min(MAP_W - 1, gx)),
+    gy: Math.max(0, Math.min(MAP_H - 1, gy)),
+  };
+}
+
 // ---- 游戏状态 ----
 const game = {
   minerals: 200,
@@ -1763,7 +1770,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
       if (command.type === 'move') {
         const row = Math.floor(i / cols);
         const col = i % cols;
-        cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+        cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
       }
       u.actionQueue = [];
       applyCommand(u, cmd);
@@ -1771,14 +1778,56 @@ function issueCommand(mx, my, isShiftHeld = false) {
   });
 }
 
-// 小地图点击
-mmCanvas.addEventListener('click', (e) => {
+function minimapEventToPosition(e) {
   const rect = mmCanvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
-  camera.x = (mx / mmCanvas.width) * MAP_W * CELL - canvas.width / 2;
-  camera.y = (my / mmCanvas.height) * MAP_H * CELL - canvas.height / 2;
+  const worldX = (mx / mmCanvas.width) * MAP_W * CELL;
+  const worldY = (my / mmCanvas.height) * MAP_H * CELL;
+  return {
+    worldX,
+    worldY,
+    ...clampGrid(Math.floor(worldX / CELL), Math.floor(worldY / CELL)),
+  };
+}
+
+// 小地图点击
+mmCanvas.addEventListener('click', (e) => {
+  const { worldX, worldY } = minimapEventToPosition(e);
+  camera.x = worldX - canvas.width / 2;
+  camera.y = worldY - canvas.height / 2;
   clampCamera();
+});
+
+// 小地图右键：对选中单位下达移动命令
+mmCanvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+
+  const selectedUnits = game.selected
+    .map(id => entities.find(en => en.id === id))
+    .filter(en => en && en.kind === 'unit' && en.team === TEAM_PLAYER);
+
+  if (selectedUnits.length === 0) return;
+
+  const { gx, gy } = minimapEventToPosition(e);
+  const command = { type: 'move', targetGrid: { gx, gy } };
+  const count = selectedUnits.length;
+  const cols = Math.ceil(Math.sqrt(count));
+
+  selectedUnits.forEach((u, i) => {
+    if (e.shiftKey) {
+      u.actionQueue.push(command);
+      if (u.state === 'idle') transitionToIdle(u);
+    } else {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
+      u.actionQueue = [];
+      applyCommand(u, cmd);
+    }
+  });
+
+  addLog(e.shiftKey ? '小地图: 排队移动' : '小地图: 移动命令');
 });
 
 // ---- 编队系统 ----
