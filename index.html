@@ -335,17 +335,22 @@ const AudioManager = {
     this.ctx = new AudioContext();
   },
 
-  resume() {
+  async resume() {
     this.init();
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      try {
+        await this.ctx.resume();
+      } catch (err) {
+        return false;
+      }
     }
+    return this.ctx && this.ctx.state === 'running';
   },
 
-  play(frequency, duration, type = 'sine', volume = 0.1) {
+  async play(frequency, duration, type = 'sine', volume = 0.1) {
     if (!this.enabled) return;
-    this.resume();
-    if (!this.ctx) return;
+    const ready = await this.resume();
+    if (!ready || !this.enabled) return;
 
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
