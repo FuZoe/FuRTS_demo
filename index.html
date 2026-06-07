@@ -1686,7 +1686,7 @@ function transitionToIdle(unit) {
   if (unit.actionQueue.length > 0) {
     const nextCommand = unit.actionQueue.shift();
     applyCommand(unit, nextCommand);
-  } else if (unit.type === 'worker' && unit.lastGatherTarget) {
+  } else if (unit.type === 'worker' && unit.lastGatherTarget && unit.carrying < GATHER_AMOUNT) {
     const gt = unit.lastGatherTarget;
     if (mapLayers.resource[gt.gy]?.[gt.gx] === 1) {
       unit.state = 'gather';
