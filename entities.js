@@ -115,6 +115,84 @@ function entityAt(gx, gy) {
   });
 }
 
+// BFS 发现以 (gx,gy) 为中心的连续矿区
+function findMineralPatchCells(gx, gy, maxRadius = 4) {
+  const result = [];
+  const visited = new Set();
+  const queue = [{ gx, gy }];
+
+  while (queue.length > 0) {
+    const cell = queue.shift();
+    const key = cell.gy * MAP_W + cell.gx;
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    if (cell.gx < 0 || cell.gx >= MAP_W || cell.gy < 0 || cell.gy >= MAP_H) continue;
+    if (mapLayers.resource[cell.gy]?.[cell.gx] !== 1) continue;
+    if (gridDist(gx, gy, cell.gx, cell.gy) > maxRadius) continue;
+
+    result.push(cell);
+    for (const dir of [
+      { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+      { dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 },
+    ]) {
+      queue.push({ gx: cell.gx + dir.dx, gy: cell.gy + dir.dy });
+    }
+  }
+  return result;
+}
+
+// 负载感知分配：将工人均匀分配到矿区各矿格
+function distributeWorkersToMinerals(workers, mineralCells) {
+  const load = new Map();
+  for (const cell of mineralCells) {
+    load.set(`${cell.gx},${cell.gy}`, 0);
+  }
+
+  const workerIds = new Set(workers.map(w => w.id));
+  for (const e of entities) {
+    if (e.kind !== 'unit' || e.type !== 'worker' || e.hp <= 0) continue;
+    if (workerIds.has(e.id)) continue;
+    if (e.state !== 'gather' || !e.gatherTarget) continue;
+    const key = `${e.gatherTarget.gx},${e.gatherTarget.gy}`;
+    if (load.has(key)) {
+      load.set(key, load.get(key) + 1);
+    }
+  }
+
+  for (const worker of workers) {
+    let bestCell = null;
+    let bestLoad = Infinity;
+    let bestDist = Infinity;
+
+    for (const cell of mineralCells) {
+      const key = `${cell.gx},${cell.gy}`;
+      const curLoad = load.get(key);
+      const d = gridDist(worker.gx, worker.gy, cell.gx, cell.gy);
+
+      if (curLoad < bestLoad || (curLoad === bestLoad && d < bestDist)) {
+        bestCell = cell;
+        bestLoad = curLoad;
+        bestDist = d;
+      }
+    }
+
+    if (bestCell) {
+      clearPatrol(worker);
+      worker.state = 'gather';
+      worker.gatherTarget = { gx: bestCell.gx, gy: bestCell.gy };
+      worker.target = null;
+      worker.attackTarget = null;
+      worker.buildTarget = null;
+      worker.gatherTimer = 0;
+      setUnitPath(worker, bestCell.gx, bestCell.gy);
+
+      const key = `${bestCell.gx},${bestCell.gy}`;
+      load.set(key, load.get(key) + 1);
+    }
+  }
+}
+
 function findNearestMineral(fromX, fromY) {
   let best = null, bestDist = Infinity;
   for (let y = 0; y < MAP_H; y++) {
@@ -126,6 +204,40 @@ function findNearestMineral(fromX, fromY) {
     }
   }
   return best;
+}
+
+// 在附近矿格中选择负载最低的（距离作为次级排序）
+function findLeastLoadedMineral(fromX, fromY) {
+  const nearest = findNearestMineral(fromX, fromY);
+  if (!nearest) return null;
+  const patch = findMineralPatchCells(nearest.gx, nearest.gy);
+  if (patch.length === 0) return nearest;
+
+  const load = new Map();
+  for (const cell of patch) {
+    load.set(`${cell.gx},${cell.gy}`, 0);
+  }
+  for (const e of entities) {
+    if (e.kind !== 'unit' || e.type !== 'worker' || e.hp <= 0) continue;
+    if (e.state !== 'gather' || !e.gatherTarget) continue;
+    const key = `${e.gatherTarget.gx},${e.gatherTarget.gy}`;
+    if (load.has(key)) {
+      load.set(key, load.get(key) + 1);
+    }
+  }
+
+  let bestCell = null, bestLoad = Infinity, bestDist = Infinity;
+  for (const cell of patch) {
+    const key = `${cell.gx},${cell.gy}`;
+    const curLoad = load.get(key);
+    const d = gridDist(fromX, fromY, cell.gx, cell.gy);
+    if (curLoad < bestLoad || (curLoad === bestLoad && d < bestDist)) {
+      bestCell = cell;
+      bestLoad = curLoad;
+      bestDist = d;
+    }
+  }
+  return bestCell || nearest;
 }
 
 function findNearestBase(fromX, fromY, team) {

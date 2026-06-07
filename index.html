@@ -538,7 +538,7 @@ function update() {
             e.carrying = 0;
             e.gatherTimer = 0;
             e.path = [];
-            const mineral = findNearestMineral(e.gx, e.gy);
+            const mineral = findLeastLoadedMineral(e.gx, e.gy);
             if (mineral) {
               e.gatherTarget = mineral;
               setUnitPath(e, mineral.gx, mineral.gy);
@@ -690,6 +690,23 @@ function updateFog() {
 }
 
 // 注: 初始视野计算移到 setupGameForMap() 中，在地图初始化之后才执行
+
+// 判断敌方实体当前是否对玩家可见 (用于渲染过滤 + 指令目标过滤)
+// 与渲染逻辑保持一致: 建筑取中心格, 单位取脚下格
+function isEnemyVisibleToPlayer(e) {
+  if (!window.fogEnabled) return true;
+  if (e.team !== TEAM_ENEMY) return true;
+  let cgx, cgy;
+  if (e.kind === 'building') {
+    const bDef = BUILDING_DEFS[e.type];
+    cgx = e.gx + Math.floor(bDef.w / 2);
+    cgy = e.gy + Math.floor(bDef.h / 2);
+  } else {
+    cgx = Math.floor(e.x / CELL);
+    cgy = Math.floor(e.y / CELL);
+  }
+  return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
+}
 
 // ---- 敌方AI ----
 function enemyAI() {
@@ -1331,9 +1348,9 @@ function updateGuide() {
 
   if (game.commandMode === 'patrol') {
     html += '<div class="guide-section">';
-    html += row('Left click', 'Set patrol point');
-    html += row('Shift+click', 'Queue patrol');
-    html += row('Right/Esc', 'Cancel');
+    html += row('左键', '设置巡逻点');
+    html += row('Shift+左键', '排队巡逻');
+    html += row('右键/Esc', '取消巡逻');
     html += '</div>';
     guideEl.innerHTML = html;
     return;
@@ -1495,7 +1512,7 @@ function updateSidebar() {
       infoEl.innerHTML = html;
     }
 
-    let btns = '<button class="btn" onclick="startPatrolCommand()"><span class="btn-key">[P]</span> Patrol</button>';
+    let btns = '<button class="btn" onclick="startPatrolCommand()"><span class="btn-key">[P]</span> 巡逻</button>';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
       const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
@@ -1541,7 +1558,7 @@ function startPatrolCommand() {
   game.buildMode = null;
   game.buildPreview = null;
   game.commandMode = 'patrol';
-  addLog('Patrol mode: left-click a destination');
+  addLog('进入巡逻模式：左键选择巡逻点');
   updateSidebar();
 }
 
@@ -1601,6 +1618,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (game.commandMode) {
       game.commandMode = null;
       updateSidebar();
+      return;
     }
     if (game.buildMode) {
       cancelBuild();
@@ -1880,14 +1898,18 @@ function issueCommand(mx, my, isShiftHeld = false) {
 
   if (selectedUnits.length === 0) return;
 
-  const target = entityAt(gx, gy);
+  const rawTarget = entityAt(gx, gy);
+  // 战争迷雾: 不可见的敌方实体不能被右键直接命中 (防止依靠记忆攻击迷雾下的建筑/单位)
+  const target = (rawTarget && rawTarget.team === TEAM_ENEMY && !isEnemyVisibleToPlayer(rawTarget))
+    ? null
+    : rawTarget;
 
   // 构建指令对象
   let command = null;
 
   if (game.commandMode === 'patrol') {
     command = { type: 'patrol', targetGrid: { gx, gy } };
-    addLog(isShiftHeld ? 'Patrol queued' : 'Patrol command');
+    addLog(isShiftHeld ? '排队巡逻' : '开始巡逻');
   } else if (target && target.team === TEAM_ENEMY) {
     command = { type: 'attack', targetId: target.id };
     addLog(isShiftHeld ? '⚔️ 排队攻击!' : '⚔️ 命令攻击!');
@@ -1899,6 +1921,19 @@ function issueCommand(mx, my, isShiftHeld = false) {
     addLog(isShiftHeld ? '🔨 排队建造' : '🔨 前往建造');
   } else {
     command = { type: 'move', targetGrid: { gx, gy } };
+  }
+
+  // 采矿指令立即执行时，使用分散采矿逻辑（工人均匀分配到不同矿格）
+  if (command.type === 'gather' && !isShiftHeld) {
+    const workers = selectedUnits.filter(u => u.type === 'worker');
+    if (workers.length > 0) {
+      const mineralCells = findMineralPatchCells(gx, gy);
+      if (mineralCells.length > 0) {
+        for (const w of workers) { w.actionQueue = []; }
+        distributeWorkersToMinerals(workers, mineralCells);
+      }
+    }
+    return;
   }
 
   const count = selectedUnits.length;
