@@ -908,7 +908,7 @@ function render() {
         ctx.fillRect(bx, by + bh + 2, bw * pct, 4);
       }
 
-      drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, e.team, game.selected.includes(e.id));
+      drawHpBar(bx, by - 6, bw, e.hp, e.maxHp, game.selected.includes(e.id));
     } else {
       const uDef = UNIT_DEFS[e.type];
       // 丧尸系单位保留自身的暗色，便于与普通敌军区分
@@ -964,7 +964,7 @@ function render() {
         ctx.fillText('🔨', sx + 10, sy + 10);
       }
 
-      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, e.team, game.selected.includes(e.id));
+      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, game.selected.includes(e.id));
     }
   }
 
@@ -1137,19 +1137,20 @@ function isHitFlashActive(e) {
   return e.lastHitFrame && game.frame - e.lastHitFrame < 10 && game.frame % 4 < 2;
 }
 
-function drawHpBar(x, y, w, hp, maxHp, team, isSelected = false) {
+function drawHpBar(x, y, w, hp, maxHp, isSelected = false) {
   if (hp >= maxHp && !isSelected) return;
   const pct = hp / maxHp;
+  const h = isSelected ? 10 : 3;
   ctx.fillStyle = '#300';
-  ctx.fillRect(x, y, w, 3);
+  ctx.fillRect(x, y, w, h);
   ctx.fillStyle = pct > 0.5 ? '#0f0' : pct > 0.25 ? '#ff0' : '#f00';
-  ctx.fillRect(x, y, w * pct, 3);
+  ctx.fillRect(x, y, w * pct, h);
   if (isSelected) {
-    ctx.fillStyle = '#fff';
-    ctx.font = '8px Courier New';
+    ctx.fillStyle = pct > 0.25 ? '#000' : '#fff';
+    ctx.font = 'bold 8px Courier New';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(`${Math.max(0, hp)}/${maxHp}`, x + w / 2, y - 1);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${Math.max(0, hp)}/${maxHp}`, x + w / 2, y + h / 2);
   }
 }
 
