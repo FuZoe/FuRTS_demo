@@ -312,6 +312,8 @@ const game = {
   keysDown: {},
 };
 
+const FOG_UPDATE_INTERVAL = 3;
+
 // ---- 初始单位 / 基地放置（按地图配置） ----
 // 这部分逻辑放进 setupGameForMap()，开局时由地图选择界面触发
 function setupGameForMap(mapDef) {
@@ -613,7 +615,7 @@ function update() {
   applyUnitSeparation();
 
   // 战争迷雾更新
-  updateFog();
+  if (game.frame % FOG_UPDATE_INTERVAL === 0) updateFog();
 
   countPop();
 
