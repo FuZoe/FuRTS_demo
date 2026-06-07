@@ -35,6 +35,14 @@ body {
 .hud-item { white-space: nowrap; }
 .hud-label { color: #0a0; }
 .hud-value { color: #0f0; font-weight: bold; }
+#hudIdleWorkers {
+  display: none;
+  cursor: pointer;
+}
+#hudIdleWorkers:hover .hud-label,
+#hudIdleWorkers:hover .hud-value {
+  color: #ff0;
+}
 #sidebar {
   position: fixed;
   top: 36px;
@@ -226,6 +234,9 @@ body {
   <span class="hud-item"><span class="hud-label">单位: </span><span class="hud-value" id="hudUnits">0</span></span>
   <span class="hud-item"><span class="hud-label">敌军: </span><span class="hud-value" id="hudEnemies">0</span></span>
   <span class="hud-item"><span class="hud-label">时间: </span><span class="hud-value" id="hudTime">00:00</span></span>
+  <span class="hud-item" id="hudIdleWorkers" onclick="selectIdleWorkers()" title="点击选中空闲工人">
+    <span class="hud-label">闲置: </span><span class="hud-value" id="hudIdleCount">0</span>
+  </span>
   <span class="hud-item" style="margin-left:auto;color:#0a0;font-size:12px;">左键选择/框选 | 右键指令 | Ctrl/Shift/Alt+数字编队</span>
 </div>
 <canvas id="gameCanvas"></canvas>
@@ -1319,6 +1330,22 @@ function updateHUD() {
   document.getElementById('hudUnits').textContent = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit').length;
   document.getElementById('hudEnemies').textContent = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0).length;
   document.getElementById('hudTime').textContent = formatTime(game.frame);
+  const idleWorkers = entities.filter(e =>
+    e.team === TEAM_PLAYER &&
+    e.hp > 0 &&
+    e.kind === 'unit' &&
+    e.type === 'worker' &&
+    e.state === 'idle'
+  );
+  const idleEl = document.getElementById('hudIdleWorkers');
+  const idleCount = document.getElementById('hudIdleCount');
+  if (idleWorkers.length > 0) {
+    idleEl.style.display = 'inline';
+    idleCount.textContent = idleWorkers.length;
+    idleCount.style.color = game.frame % 60 < 30 ? '#f80' : '#ff0';
+  } else {
+    idleEl.style.display = 'none';
+  }
 }
 
 function updateGuide() {
