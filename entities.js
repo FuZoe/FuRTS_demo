@@ -46,6 +46,7 @@ function createUnit(type, gx, gy, team) {
     y: gy * CELL + CELL / 2,
     hp: def.hp,
     maxHp: def.hp,
+    lastHitFrame: 0,
     state: 'idle',
     target: null,
     attackTarget: null,
@@ -78,6 +79,7 @@ function createBuilding(type, gx, gy, team) {
     y: gy * CELL + (def.h * CELL) / 2,
     hp: def.hp,
     maxHp: def.hp,
+    lastHitFrame: 0,
     buildProgress: type === 'base' ? def.hp : 0,
     queue: [],
     queueTimer: 0,
@@ -149,6 +151,7 @@ function distributeWorkersToMinerals(workers, mineralCells) {
     load.set(`${cell.gx},${cell.gy}`, 0);
   }
 
+  // 统计全局正在采这些矿格的工人（排除本次要分配的工人）
   const workerIds = new Set(workers.map(w => w.id));
   for (const e of entities) {
     if (e.kind !== 'unit' || e.type !== 'worker' || e.hp <= 0) continue;
@@ -160,6 +163,7 @@ function distributeWorkersToMinerals(workers, mineralCells) {
     }
   }
 
+  // 贪心分配：每个工人选择当前负载最低的矿格，负载相同选距离最近的
   for (const worker of workers) {
     let bestCell = null;
     let bestLoad = Infinity;
@@ -206,6 +210,10 @@ function findNearestMineral(fromX, fromY) {
   return best;
 }
 
+function hasMineral(target) {
+  return !!target && mapLayers.resource[target.gy]?.[target.gx] === 1;
+}
+
 // 在附近矿格中选择负载最低的（距离作为次级排序）
 function findLeastLoadedMineral(fromX, fromY) {
   const nearest = findNearestMineral(fromX, fromY);
@@ -238,6 +246,11 @@ function findLeastLoadedMineral(fromX, fromY) {
     }
   }
   return bestCell || nearest;
+}
+
+function findNextGatherTarget(unit) {
+  if (hasMineral(unit.gatherTarget)) return unit.gatherTarget;
+  return findLeastLoadedMineral(unit.gx, unit.gy);
 }
 
 function findNearestBase(fromX, fromY, team) {
