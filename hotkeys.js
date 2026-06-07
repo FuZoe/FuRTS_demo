@@ -24,7 +24,7 @@ const HOTKEYS = [
     { key: '2', desc: '工人建造兵营；兵营生产远程兵' },
     { key: '3', desc: '工人建造工厂；工厂生产坦克' },
     { key: '4', desc: '工人建造人口房' },
-    { key: 'Esc', desc: '取消建造模式' },
+    { key: 'Esc', desc: '取消建造模式或生产队列' },
   ]},
   { category: '其他', keys: [
     { key: 'R', desc: '游戏结束后重新开始' },
