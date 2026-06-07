@@ -1432,7 +1432,7 @@ function trainUnit(type, buildingId) {
 
 function cancelProduction(buildingId, queueIndex) {
   const building = entities.find(e => e.id === buildingId);
-  if (!building || !building.queue || queueIndex < 0 || queueIndex >= building.queue.length) return false;
+  if (!building || building.team !== TEAM_PLAYER || !building.queue || queueIndex < 0 || queueIndex >= building.queue.length) return false;
 
   const unitType = building.queue[queueIndex];
   const uDef = UNIT_DEFS[unitType];
