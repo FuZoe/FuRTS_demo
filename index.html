@@ -1989,6 +1989,11 @@ function isCommandValid(command, unit) {
   switch (command.type) {
     case 'move':
       return true;
+    case 'patrol': {
+      if (!command.targetGrid) return false;
+      const { gx, gy } = command.targetGrid;
+      return gx >= 0 && gx < MAP_W && gy >= 0 && gy < MAP_H;
+    }
     case 'attack': {
       const target = entities.find(t => t.id === command.targetId);
       return !!target && target.hp > 0;
