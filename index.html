@@ -392,6 +392,36 @@ function countPop() {
   game.maxPop = maxPop;
 }
 
+function getUnitSpawnPoint(building) {
+  const def = BUILDING_DEFS[building.type];
+  const preferred = {
+    gx: building.gx + (building.team === TEAM_PLAYER ? -2 : def.w + 1),
+    gy: building.gy + 1,
+  };
+  if (isWalkable(preferred.gx, preferred.gy) && mapLayers.resource[preferred.gy][preferred.gx] === 0) {
+    return preferred;
+  }
+
+  const minX = building.gx - 1;
+  const maxX = building.gx + def.w;
+  const minY = building.gy - 1;
+  const maxY = building.gy + def.h;
+  let best = null;
+  let bestDist = Infinity;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (x >= building.gx && x < building.gx + def.w && y >= building.gy && y < building.gy + def.h) continue;
+      if (!isWalkable(x, y) || mapLayers.resource[y][x] !== 0) continue;
+      const d = Math.abs(x - preferred.gx) + Math.abs(y - preferred.gy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { gx: x, gy: y };
+      }
+    }
+  }
+  return best || { gx: building.gx, gy: building.gy };
+}
+
 // ---- 更新逻辑 ----
 function update() {
   if (game.paused || game.gameOver) return;
@@ -424,9 +454,8 @@ function update() {
         const producing = e.queue[0];
         const def = UNIT_DEFS[producing];
         if (e.queueTimer >= def.buildTime) {
-          const spawnX = e.gx + (e.team === TEAM_PLAYER ? -2 : 3);
-          const spawnY = e.gy + 1;
-          const newUnit = createUnit(producing, spawnX, spawnY, e.team);
+          const spawn = getUnitSpawnPoint(e);
+          const newUnit = createUnit(producing, spawn.gx, spawn.gy, e.team);
           applyRallyPoint(e, newUnit);
           e.queue.shift();
           e.queueTimer = 0;
@@ -708,10 +737,9 @@ function enemyAI() {
 
   // 建造兵营
   if (!enemyBuildings.find(b => b.type === 'barracks') && game.frame > 600) {
-    const bx = eBase.gx + 4;
-    const by = eBase.gy;
-    if (bx + 1 < MAP_W && by + 1 < MAP_H) {
-      const b = createBuilding('barracks', bx, by, TEAM_ENEMY);
+    const site = getEnemyBarracksSite(eBase);
+    if (site) {
+      const b = createBuilding('barracks', site.gx, site.gy, TEAM_ENEMY);
       b.buildProgress = b.maxHp;
     }
   }
@@ -732,6 +760,16 @@ function enemyAI() {
       if (game.frame % 600 === 0) addLog('⚠️ 敌军发起进攻！');
     }
   }
+}
+
+function getEnemyBarracksSite(eBase) {
+  const candidates = [
+    { gx: eBase.gx + 4, gy: eBase.gy },
+    { gx: eBase.gx - 4, gy: eBase.gy + 3 },
+    { gx: eBase.gx, gy: eBase.gy + 4 },
+    { gx: eBase.gx, gy: eBase.gy - 3 },
+  ];
+  return candidates.find(site => canPlaceBuilding('barracks', site.gx, site.gy)) || null;
 }
 
 // 「亡者之夜」专属敌方 AI:
