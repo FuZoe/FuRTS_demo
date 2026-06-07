@@ -287,6 +287,13 @@ function clampCamera() {
   camera.y = Math.max(0, Math.min(camera.y, maxY));
 }
 
+function clampGrid(gx, gy) {
+  return {
+    gx: Math.max(0, Math.min(MAP_W - 1, gx)),
+    gy: Math.max(0, Math.min(MAP_H - 1, gy)),
+  };
+}
+
 // ---- 游戏状态 ----
 const game = {
   minerals: 200,
@@ -662,6 +669,23 @@ function updateFog() {
 
 // 注: 初始视野计算移到 setupGameForMap() 中，在地图初始化之后才执行
 
+// 判断敌方实体当前是否对玩家可见 (用于渲染过滤 + 指令目标过滤)
+// 与渲染逻辑保持一致: 建筑取中心格, 单位取脚下格
+function isEnemyVisibleToPlayer(e) {
+  if (!window.fogEnabled) return true;
+  if (e.team !== TEAM_ENEMY) return true;
+  let cgx, cgy;
+  if (e.kind === 'building') {
+    const bDef = BUILDING_DEFS[e.type];
+    cgx = e.gx + Math.floor(bDef.w / 2);
+    cgy = e.gy + Math.floor(bDef.h / 2);
+  } else {
+    cgx = Math.floor(e.x / CELL);
+    cgy = Math.floor(e.y / CELL);
+  }
+  return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
+}
+
 // ---- 敌方AI ----
 function enemyAI() {
   if (game.currentMapId === 'dead_of_night') {
@@ -866,19 +890,8 @@ function render() {
 
     if (sx < -CELL * 3 || sx > canvas.width + CELL * 3 || sy < -CELL * 3 || sy > canvas.height + CELL * 3) continue;
 
-    // 战争迷雾: 敌方实体仅在视野格内才渲染 (建筑取中心格判断)
-    if (e.team === TEAM_ENEMY) {
-      let cgx, cgy;
-      if (e.kind === 'building') {
-        const bDef = BUILDING_DEFS[e.type];
-        cgx = e.gx + Math.floor(bDef.w / 2);
-        cgy = e.gy + Math.floor(bDef.h / 2);
-      } else {
-        cgx = Math.floor(e.x / CELL);
-        cgy = Math.floor(e.y / CELL);
-      }
-      if (fogMap[cgy]?.[cgx] !== FOG_VISIBLE) continue;
-    }
+    // 战争迷雾: 敌方实体仅在视野格内才渲染
+    if (!isEnemyVisibleToPlayer(e)) continue;
 
     if (e.kind === 'building') {
       const bDef = BUILDING_DEFS[e.type];
@@ -1184,11 +1197,7 @@ function renderMinimap() {
   // 实体: 玩家实体始终显示, 敌方实体仅在 VISIBLE 格内显示
   for (const e of entities) {
     if (e.hp <= 0) continue;
-    if (e.team === TEAM_ENEMY && window.fogEnabled) {
-      const cgx = Math.floor(e.x / CELL);
-      const cgy = Math.floor(e.y / CELL);
-      if (fogMap[cgy]?.[cgx] !== FOG_VISIBLE) continue;
-    }
+    if (!isEnemyVisibleToPlayer(e)) continue;
     const ex = (e.x / CELL) * sx;
     const ey = (e.y / CELL) * sy;
     if (e.team === TEAM_PLAYER) {
@@ -1680,13 +1689,40 @@ function applyCommand(unit, command) {
   }
 }
 
-function transitionToIdle(unit) {
-  if (unit.actionQueue.length > 0) {
-    const nextCommand = unit.actionQueue.shift();
-    applyCommand(unit, nextCommand);
-  } else {
-    unit.state = 'idle';
+function isCommandValid(command, unit) {
+  if (!command || !unit) return false;
+
+  switch (command.type) {
+    case 'move':
+      return true;
+    case 'attack': {
+      const target = entities.find(t => t.id === command.targetId);
+      return !!target && target.hp > 0;
+    }
+    case 'gather': {
+      if (unit.type !== 'worker' || !command.gatherTarget) return false;
+      const { gx, gy } = command.gatherTarget;
+      return mapLayers.resource[gy]?.[gx] === 1;
+    }
+    case 'build': {
+      if (unit.type !== 'worker') return false;
+      const building = entities.find(b => b.id === command.buildTargetId);
+      return !!building && building.hp > 0 && building.buildProgress < building.maxHp;
+    }
+    default:
+      return false;
   }
+}
+
+function transitionToIdle(unit) {
+  while (unit.actionQueue.length > 0) {
+    const nextCommand = unit.actionQueue.shift();
+    if (isCommandValid(nextCommand, unit)) {
+      applyCommand(unit, nextCommand);
+      return;
+    }
+  }
+  unit.state = 'idle';
 }
 
 function issueCommand(mx, my, isShiftHeld = false) {
@@ -1717,7 +1753,11 @@ function issueCommand(mx, my, isShiftHeld = false) {
 
   if (selectedUnits.length === 0) return;
 
-  const target = entityAt(gx, gy);
+  const rawTarget = entityAt(gx, gy);
+  // 战争迷雾: 不可见的敌方实体不能被右键直接命中 (防止依靠记忆攻击迷雾下的建筑/单位)
+  const target = (rawTarget && rawTarget.team === TEAM_ENEMY && !isEnemyVisibleToPlayer(rawTarget))
+    ? null
+    : rawTarget;
 
   // 构建指令对象
   let command = null;
@@ -1733,6 +1773,19 @@ function issueCommand(mx, my, isShiftHeld = false) {
     addLog(isShiftHeld ? '🔨 排队建造' : '🔨 前往建造');
   } else {
     command = { type: 'move', targetGrid: { gx, gy } };
+  }
+
+  // 采矿指令立即执行时，使用分散采矿逻辑（工人均匀分配到不同矿格）
+  if (command.type === 'gather' && !isShiftHeld) {
+    const workers = selectedUnits.filter(u => u.type === 'worker');
+    if (workers.length > 0) {
+      const mineralCells = findMineralPatchCells(gx, gy);
+      if (mineralCells.length > 0) {
+        for (const w of workers) { w.actionQueue = []; }
+        distributeWorkersToMinerals(workers, mineralCells);
+      }
+    }
+    return;
   }
 
   const count = selectedUnits.length;
@@ -1751,7 +1804,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
       if (command.type === 'move') {
         const row = Math.floor(i / cols);
         const col = i % cols;
-        cmd = { type: 'move', targetGrid: { gx: gx + col, gy: gy + row } };
+        cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
       }
       u.actionQueue = [];
       applyCommand(u, cmd);
@@ -1759,14 +1812,56 @@ function issueCommand(mx, my, isShiftHeld = false) {
   });
 }
 
-// 小地图点击
-mmCanvas.addEventListener('click', (e) => {
+function minimapEventToPosition(e) {
   const rect = mmCanvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
-  camera.x = (mx / mmCanvas.width) * MAP_W * CELL - canvas.width / 2;
-  camera.y = (my / mmCanvas.height) * MAP_H * CELL - canvas.height / 2;
+  const worldX = (mx / mmCanvas.width) * MAP_W * CELL;
+  const worldY = (my / mmCanvas.height) * MAP_H * CELL;
+  return {
+    worldX,
+    worldY,
+    ...clampGrid(Math.floor(worldX / CELL), Math.floor(worldY / CELL)),
+  };
+}
+
+// 小地图点击
+mmCanvas.addEventListener('click', (e) => {
+  const { worldX, worldY } = minimapEventToPosition(e);
+  camera.x = worldX - canvas.width / 2;
+  camera.y = worldY - canvas.height / 2;
   clampCamera();
+});
+
+// 小地图右键：对选中单位下达移动命令
+mmCanvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+
+  const selectedUnits = game.selected
+    .map(id => entities.find(en => en.id === id))
+    .filter(en => en && en.kind === 'unit' && en.team === TEAM_PLAYER);
+
+  if (selectedUnits.length === 0) return;
+
+  const { gx, gy } = minimapEventToPosition(e);
+  const command = { type: 'move', targetGrid: { gx, gy } };
+  const count = selectedUnits.length;
+  const cols = Math.ceil(Math.sqrt(count));
+
+  selectedUnits.forEach((u, i) => {
+    if (e.shiftKey) {
+      u.actionQueue.push(command);
+      if (u.state === 'idle') transitionToIdle(u);
+    } else {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
+      u.actionQueue = [];
+      applyCommand(u, cmd);
+    }
+  });
+
+  addLog(e.shiftKey ? '小地图: 排队移动' : '小地图: 移动命令');
 });
 
 // ---- 编队系统 ----
