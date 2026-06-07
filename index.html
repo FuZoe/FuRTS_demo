@@ -1067,7 +1067,7 @@ function render() {
         ctx.fillText('P', sx + 10, sy + 10);
       }
 
-      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, e.team);
+      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, game.selected.includes(e.id));
     }
   }
 
@@ -2038,6 +2038,7 @@ function stopSelectedUnits() {
     unit.attackTarget = null;
     unit.gatherTarget = null;
     unit.buildTarget = null;
+    clearPatrol(unit);
     unit.gatherTimer = 0;
     unit.pathRetryFrame = 0;
     stopped++;
