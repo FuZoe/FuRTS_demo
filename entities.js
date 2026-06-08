@@ -46,6 +46,7 @@ function createUnit(type, gx, gy, team) {
     y: gy * CELL + CELL / 2,
     hp: def.hp,
     maxHp: def.hp,
+    lastHitFrame: 0,
     state: 'idle',
     target: null,
     attackTarget: null,
@@ -56,6 +57,10 @@ function createUnit(type, gx, gy, team) {
     gatherTimer: 0,
     path: [],
     pathRetryFrame: 0,
+    patrolPointA: null,
+    patrolPointB: null,
+    patrolToB: true,
+    _patrolState: null,
     actionQueue: [],
   };
   entities.push(e);
@@ -75,6 +80,7 @@ function createBuilding(type, gx, gy, team) {
     y: gy * CELL + (def.h * CELL) / 2,
     hp: def.hp,
     maxHp: def.hp,
+    lastHitFrame: 0,
     buildProgress: type === 'base' ? def.hp : 0,
     queue: [],
     queueTimer: 0,
@@ -177,9 +183,13 @@ function distributeWorkersToMinerals(workers, mineralCells) {
     }
 
     if (bestCell) {
+      clearPatrol(worker);
       worker.state = 'gather';
       worker.gatherTarget = { gx: bestCell.gx, gy: bestCell.gy };
       worker.lastGatherTarget = worker.gatherTarget;
+      worker.target = null;
+      worker.attackTarget = null;
+      worker.buildTarget = null;
       worker.gatherTimer = 0;
       setUnitPath(worker, bestCell.gx, bestCell.gy);
 
@@ -200,6 +210,10 @@ function findNearestMineral(fromX, fromY) {
     }
   }
   return best;
+}
+
+function hasMineral(target) {
+  return !!target && mapLayers.resource[target.gy]?.[target.gx] === 1;
 }
 
 // 在附近矿格中选择负载最低的（距离作为次级排序）
@@ -234,6 +248,11 @@ function findLeastLoadedMineral(fromX, fromY) {
     }
   }
   return bestCell || nearest;
+}
+
+function findNextGatherTarget(unit) {
+  if (hasMineral(unit.gatherTarget)) return unit.gatherTarget;
+  return findLeastLoadedMineral(unit.gx, unit.gy);
 }
 
 function findNearestBase(fromX, fromY, team) {
