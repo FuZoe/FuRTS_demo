@@ -2166,21 +2166,23 @@ function issueCommand(mx, my, isShiftHeld = false) {
 
   // 构建指令对象
   let command = null;
+  let commandLog = null;
 
   if (game.commandMode === 'patrol') {
     command = { type: 'patrol', targetGrid: { gx, gy } };
-    addLog(isShiftHeld ? '排队巡逻' : '开始巡逻');
+    commandLog = { queued: '排队巡逻', immediate: '开始巡逻' };
   } else if (target && target.team === TEAM_ENEMY) {
     command = { type: 'attack', targetId: target.id };
-    addLog(isShiftHeld ? '⚔️ 排队攻击!' : '⚔️ 命令攻击!');
+    commandLog = { queued: '⚔️ 排队攻击', immediate: '⚔️ 命令攻击!' };
   } else if (mapLayers.resource[gy]?.[gx] === 1) {
     command = { type: 'gather', gatherTarget: { gx, gy } };
-    addLog(isShiftHeld ? '⛏️ 排队采矿' : '⛏️ 前往采矿');
+    commandLog = { queued: '⛏️ 排队采矿', immediate: '⛏️ 前往采矿' };
   } else if (target && target.kind === 'building' && target.team === TEAM_PLAYER && target.buildProgress < target.maxHp) {
     command = { type: 'build', buildTargetId: target.id };
-    addLog(isShiftHeld ? '🔨 排队建造' : '🔨 前往建造');
+    commandLog = { queued: '🔨 排队建造', immediate: '🔨 前往建造' };
   } else {
     command = { type: 'move', targetGrid: { gx, gy } };
+    commandLog = { queued: '🚶 排队移动', immediate: null };
   }
 
   // 采矿指令立即执行时，使用分散采矿逻辑（工人均匀分配到不同矿格）
@@ -2193,6 +2195,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
         distributeWorkersToMinerals(workers, mineralCells);
       }
     }
+    addLog(commandLog.immediate);
     return;
   }
 
@@ -2218,6 +2221,18 @@ function issueCommand(mx, my, isShiftHeld = false) {
       applyCommand(u, cmd);
     }
   });
+
+  if (isShiftHeld) {
+    const leader = selectedUnits.find(u => isCommandValid(command, u));
+    if (leader) {
+      const queueLength = leader.actionQueue.length + (leader.state !== 'idle' ? 1 : 0);
+      addLog(`${commandLog.queued} (队列: ${queueLength}个任务)`);
+    } else {
+      addLog(commandLog.queued);
+    }
+  } else if (commandLog.immediate) {
+    addLog(commandLog.immediate);
+  }
 
   if (command.type === 'move' || command.type === 'gather' || command.type === 'build' || command.type === 'patrol') {
     AudioManager.move();
