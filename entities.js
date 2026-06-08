@@ -56,6 +56,10 @@ function createUnit(type, gx, gy, team) {
     gatherTimer: 0,
     path: [],
     pathRetryFrame: 0,
+    patrolPointA: null,
+    patrolPointB: null,
+    patrolToB: true,
+    _patrolState: null,
     actionQueue: [],
   };
   entities.push(e);
@@ -178,8 +182,12 @@ function distributeWorkersToMinerals(workers, mineralCells) {
     }
 
     if (bestCell) {
+      clearPatrol(worker);
       worker.state = 'gather';
       worker.gatherTarget = { gx: bestCell.gx, gy: bestCell.gy };
+      worker.target = null;
+      worker.attackTarget = null;
+      worker.buildTarget = null;
       worker.gatherTimer = 0;
       setUnitPath(worker, bestCell.gx, bestCell.gy);
 

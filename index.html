@@ -321,6 +321,7 @@ const game = {
   dragEnd: null,
   buildMode: null,
   buildPreview: null,
+  commandMode: null,
   paused: false,
   speed: 1,
   speedAccumulator: 0,
@@ -345,7 +346,18 @@ function setupGameForMap(mapDef) {
   game.currentMapId = mapDef.id;
 
   let playerBase;
-  if (mapDef.id === 'dead_of_night') {
+  if (mapDef.id === 'war_canyon') {
+    // 战争峡谷：玩家左下，敌方右上，双方靠峡谷和侧翼路线争夺中立矿。
+    playerBase = createBuilding('base', 4, 33, TEAM_PLAYER);
+    createUnit('worker', 7, 34, TEAM_PLAYER);
+    createUnit('worker', 7, 36, TEAM_PLAYER);
+    createUnit('worker', 10, 34, TEAM_PLAYER);
+    createBuilding('base', 54, 3, TEAM_ENEMY);
+    createUnit('worker', 52, 4, TEAM_ENEMY);
+    createUnit('worker', 51, 6, TEAM_ENEMY);
+    createUnit('soldier', 49, 5, TEAM_ENEMY);
+    addLog('⚔️ 「战争峡谷」开始！控制中央峡谷，争夺两侧矿区。');
+  } else if (mapDef.id === 'dead_of_night') {
     // 玩家基地居中 (80×60 地图)，基地占 2×2 格子，中心放在 (38, 28)
     playerBase = createBuilding('base', 38, 28, TEAM_PLAYER);
     createUnit('worker', 36, 32, TEAM_PLAYER);
@@ -422,6 +434,36 @@ function countPop() {
   game.maxPop = maxPop;
 }
 
+function getUnitSpawnPoint(building) {
+  const def = BUILDING_DEFS[building.type];
+  const preferred = {
+    gx: building.gx + (building.team === TEAM_PLAYER ? -2 : def.w + 1),
+    gy: building.gy + 1,
+  };
+  if (isWalkable(preferred.gx, preferred.gy) && mapLayers.resource[preferred.gy][preferred.gx] === 0) {
+    return preferred;
+  }
+
+  const minX = building.gx - 1;
+  const maxX = building.gx + def.w;
+  const minY = building.gy - 1;
+  const maxY = building.gy + def.h;
+  let best = null;
+  let bestDist = Infinity;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (x >= building.gx && x < building.gx + def.w && y >= building.gy && y < building.gy + def.h) continue;
+      if (!isWalkable(x, y) || mapLayers.resource[y][x] !== 0) continue;
+      const d = Math.abs(x - preferred.gx) + Math.abs(y - preferred.gy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { gx: x, gy: y };
+      }
+    }
+  }
+  return best || { gx: building.gx, gy: building.gy };
+}
+
 // ---- 更新逻辑 ----
 function update() {
   if (game.paused || game.gameOver) return;
@@ -460,9 +502,8 @@ function update() {
         const producing = e.queue[0];
         const def = UNIT_DEFS[producing];
         if (e.queueTimer >= def.buildTime) {
-          const spawnX = e.gx + (e.team === TEAM_PLAYER ? -2 : 3);
-          const spawnY = e.gy + 1;
-          const newUnit = createUnit(producing, spawnX, spawnY, e.team);
+          const spawn = getUnitSpawnPoint(e);
+          const newUnit = createUnit(producing, spawn.gx, spawn.gy, e.team);
           applyRallyPoint(e, newUnit);
           e.queue.shift();
           e.queueTimer = 0;
@@ -507,12 +548,55 @@ function update() {
         }
         break;
       }
+      case 'patrol': {
+        const nearby = findNearestEnemy(e, def.range + 2);
+        if (nearby) {
+          e.attackTarget = nearby.id;
+          e._patrolState = {
+            pointA: e.patrolPointA,
+            pointB: e.patrolPointB,
+            toB: e.patrolToB,
+          };
+          e.state = 'attack';
+          e.path = [];
+          e.pathRetryFrame = 0;
+          break;
+        }
+
+        const dest = e.patrolToB ? e.patrolPointB : e.patrolPointA;
+        if (!dest) { transitionToIdle(e); break; }
+
+        if (e.path.length > 0) {
+          const arrived = followPath(e, speed);
+          if (arrived) {
+            if (e.actionQueue.length > 0) {
+              transitionToIdle(e);
+              break;
+            }
+            e.patrolToB = !e.patrolToB;
+            const next = e.patrolToB ? e.patrolPointB : e.patrolPointA;
+            if (next) setUnitPath(e, Math.floor(next.x / CELL), Math.floor(next.y / CELL));
+          }
+        } else {
+          const tgx = Math.floor(dest.x / CELL);
+          const tgy = Math.floor(dest.y / CELL);
+          setUnitPath(e, tgx, tgy);
+          if (e.path.length === 0 && moveToward(e, dest.x, dest.y, speed)) {
+            if (e.actionQueue.length > 0) {
+              transitionToIdle(e);
+              break;
+            }
+            e.patrolToB = !e.patrolToB;
+          }
+        }
+        break;
+      }
       case 'attack': {
         const target = entities.find(t => t.id === e.attackTarget);
         if (!target || target.hp <= 0) {
           e.attackTarget = null;
           e.path = [];
-          transitionToIdle(e);
+          resumePatrolOrIdle(e);
           break;
         }
         const d = dist(e, target);
@@ -539,7 +623,7 @@ function update() {
               recordPlayerKill(e, target);
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
-              transitionToIdle(e);
+              resumePatrolOrIdle(e);
               checkGameOver();
             }
           }
@@ -555,6 +639,8 @@ function update() {
             if (e.team === TEAM_PLAYER) {
               game.minerals += e.carrying;
               game.stats.mineralsGathered += e.carrying;
+            } else if (game.currentMapId !== 'dead_of_night') {
+              window.aiState.minerals += e.carrying;
             }
             e.carrying = 0;
             e.gatherTimer = 0;
@@ -741,74 +827,6 @@ function isEnemyVisibleToPlayer(e) {
     cgy = Math.floor(e.y / CELL);
   }
   return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
-}
-
-// ---- 敌方AI ----
-function enemyAI() {
-  if (game.currentMapId === 'dead_of_night') {
-    enemyAIDeadOfNight();
-    return;
-  }
-  const enemyUnits = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'unit');
-  const enemyBuildings = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0 && e.kind === 'building');
-  const eBase = enemyBuildings.find(b => b.type === 'base');
-
-  if (!eBase) return;
-
-  const enemyWorkers = enemyUnits.filter(u => u.type === 'worker');
-  const enemySoldiers = enemyUnits.filter(u => u.type !== 'worker');
-
-  // 工人去采矿
-  for (const w of enemyWorkers) {
-    if (w.state === 'idle') {
-      const mineral = findNearestMineral(w.gx, w.gy);
-      if (mineral) {
-        w.gatherTarget = mineral;
-        w.state = 'gather';
-        setUnitPath(w, mineral.gx, mineral.gy);
-      }
-    }
-  }
-
-  // 定期生产
-  if (eBase.queue.length === 0 && eBase.buildProgress >= eBase.maxHp) {
-    if (enemyWorkers.length < 3) {
-      eBase.queue.push('worker');
-    }
-  }
-
-  // 有兵营则生产战斗单位
-  const eBarracks = enemyBuildings.find(b => b.type === 'barracks' && b.buildProgress >= b.maxHp);
-  if (eBarracks && eBarracks.queue.length === 0) {
-    eBarracks.queue.push(Math.random() < 0.5 ? 'soldier' : 'ranger');
-  }
-
-  // 建造兵营
-  if (!enemyBuildings.find(b => b.type === 'barracks') && game.frame > 600) {
-    const bx = eBase.gx + 4;
-    const by = eBase.gy;
-    if (bx + 1 < MAP_W && by + 1 < MAP_H) {
-      const b = createBuilding('barracks', bx, by, TEAM_ENEMY);
-      b.buildProgress = b.maxHp;
-    }
-  }
-
-  // 进攻逻辑
-  if (enemySoldiers.length >= 3) {
-    const playerBuildings = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0);
-    if (playerBuildings.length > 0) {
-      const target = playerBuildings[0];
-      for (const s of enemySoldiers) {
-        if (s.state === 'idle') {
-          s.attackTarget = target.id;
-          s.state = 'attack';
-          s.path = [];
-          s.pathRetryFrame = 0;
-        }
-      }
-      if (game.frame % 600 === 0) addLog('⚠️ 敌军发起进攻！');
-    }
-  }
 }
 
 // 「亡者之夜」专属敌方 AI:
@@ -1039,6 +1057,12 @@ function render() {
         ctx.fillText('🔨', sx + 10, sy + 10);
       }
 
+      if (e.state === 'patrol') {
+        ctx.fillStyle = '#00e5ff';
+        ctx.font = '9px Courier New';
+        ctx.fillText('P', sx + 10, sy + 10);
+      }
+
       drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, game.selected.includes(e.id));
     }
   }
@@ -1112,7 +1136,7 @@ function render() {
 
       for (const cmd of leader.actionQueue) {
         let nx, ny;
-        if (cmd.type === 'move') {
+        if (cmd.type === 'move' || cmd.type === 'patrol') {
           nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
           ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
         } else if (cmd.type === 'attack') {
@@ -1153,6 +1177,45 @@ function render() {
       }
 
       ctx.setLineDash([]);
+    }
+  }
+
+  // Patrol route preview for selected units.
+  {
+    const patrolUnits = game.selected
+      .map(id => entities.find(en => en.id === id))
+      .filter(u => u && u.kind === 'unit' && (u.state === 'patrol' || u._patrolState));
+
+    if (patrolUnits.length > 0) {
+      ctx.strokeStyle = '#00e5ff';
+      ctx.fillStyle = '#00e5ff';
+      ctx.setLineDash([8, 5]);
+      ctx.lineWidth = 2;
+
+      for (const unit of patrolUnits) {
+        const state = unit._patrolState || {
+          pointA: unit.patrolPointA,
+          pointB: unit.patrolPointB,
+        };
+        const a = state.pointA;
+        const b = state.pointB;
+        if (!a || !b) continue;
+
+        const ax = a.x - camera.x;
+        const ay = a.y - camera.y;
+        const bx = b.x - camera.x;
+        const by = b.y - camera.y;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+
+        drawPatrolArrow(ax, ay, bx, by);
+        drawPatrolArrow(bx, by, ax, ay);
+      }
+
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
     }
   }
 
@@ -1254,6 +1317,17 @@ function drawHpBar(x, y, w, hp, maxHp, isSelected = false) {
     ctx.textBaseline = 'middle';
     ctx.fillText(`${Math.max(0, hp)}/${maxHp}`, x + w / 2, y + h / 2);
   }
+}
+
+function drawPatrolArrow(fromX, fromY, toX, toY) {
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  const size = 8;
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - Math.cos(angle - Math.PI / 6) * size, toY - Math.sin(angle - Math.PI / 6) * size);
+  ctx.lineTo(toX - Math.cos(angle + Math.PI / 6) * size, toY - Math.sin(angle + Math.PI / 6) * size);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function renderMinimap() {
@@ -1374,6 +1448,16 @@ function updateGuide() {
     html += row('左键', '放置建筑');
     html += row('右键/Esc', '取消建造');
     html += row('F1', '选中空闲工人');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
+  if (game.commandMode === 'patrol') {
+    html += '<div class="guide-section">';
+    html += row('左键', '设置巡逻点');
+    html += row('Shift+左键', '排队巡逻');
+    html += row('右键/Esc', '取消巡逻');
     html += '</div>';
     guideEl.innerHTML = html;
     return;
@@ -1555,6 +1639,7 @@ function updateSidebar() {
     if (selectedEntities.some(isStopCommandTarget)) {
       btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[S]</span> 停止</button>`;
     }
+    btns += '<button class="btn" onclick="startPatrolCommand()"><span class="btn-key">[P]</span> 巡逻</button>';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
     if (hasWorker) {
       const buildKeyMap = { barracks: '2', factory: '3', tower: '', supply: '4' };
@@ -1605,13 +1690,27 @@ function startBuild(type) {
   const bDef = BUILDING_DEFS[type];
   if (game.minerals < bDef.cost) { addLog('矿石不足！'); AudioManager.error(); return; }
   game.buildMode = type;
+  game.commandMode = null;
   addLog(`进入建造模式: ${bDef.desc} - 左键放置`);
+  updateSidebar();
+}
+
+function startPatrolCommand() {
+  const hasUnitSelected = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .some(e => e && e.kind === 'unit' && e.team === TEAM_PLAYER);
+  if (!hasUnitSelected) return;
+  game.buildMode = null;
+  game.buildPreview = null;
+  game.commandMode = 'patrol';
+  addLog('进入巡逻模式：左键选择巡逻点');
   updateSidebar();
 }
 
 function cancelBuild() {
   game.buildMode = null;
   game.buildPreview = null;
+  game.commandMode = null;
   updateSidebar();
 }
 
@@ -1647,6 +1746,10 @@ canvas.addEventListener('mousedown', (e) => {
   const my = e.offsetY;
 
   if (e.button === 0) {
+    if (game.commandMode) {
+      issueCommand(mx, my, e.shiftKey);
+      return;
+    }
     if (game.buildMode) {
       const gx = Math.floor((mx + camera.x) / CELL);
       const gy = Math.floor((my + camera.y) / CELL);
@@ -1658,6 +1761,11 @@ canvas.addEventListener('mousedown', (e) => {
   }
   if (e.button === 2) {
     e.preventDefault();
+    if (game.commandMode) {
+      game.commandMode = null;
+      updateSidebar();
+      return;
+    }
     if (game.buildMode) {
       cancelBuild();
       return;
@@ -1802,9 +1910,37 @@ function applyRallyPoint(building, unit) {
 }
 
 // ---- 指令排队系统 ----
+function clearPatrol(unit) {
+  unit.patrolPointA = null;
+  unit.patrolPointB = null;
+  unit.patrolToB = true;
+  unit._patrolState = null;
+}
+
+function resumePatrolOrIdle(unit) {
+  if (unit._patrolState) {
+    const patrolState = unit._patrolState;
+    unit.patrolPointA = patrolState.pointA;
+    unit.patrolPointB = patrolState.pointB;
+    unit.patrolToB = patrolState.toB;
+    unit._patrolState = null;
+    unit.target = null;
+    unit.attackTarget = null;
+    unit.gatherTarget = null;
+    unit.buildTarget = null;
+    unit.path = [];
+    unit.state = 'patrol';
+    const dest = unit.patrolToB ? unit.patrolPointB : unit.patrolPointA;
+    if (dest) setUnitPath(unit, Math.floor(dest.x / CELL), Math.floor(dest.y / CELL));
+  } else {
+    transitionToIdle(unit);
+  }
+}
+
 function applyCommand(unit, command) {
   switch (command.type) {
     case 'move':
+      clearPatrol(unit);
       unit.state = 'move';
       unit.target = {
         x: command.targetGrid.gx * CELL + CELL / 2,
@@ -1818,6 +1954,7 @@ function applyCommand(unit, command) {
     case 'attack': {
       const target = entities.find(t => t.id === command.targetId);
       if (!target || target.hp <= 0) break;
+      clearPatrol(unit);
       unit.state = 'attack';
       unit.attackTarget = command.targetId;
       unit.target = null;
@@ -1829,6 +1966,7 @@ function applyCommand(unit, command) {
     }
     case 'gather':
       if (unit.type !== 'worker') break;
+      clearPatrol(unit);
       unit.state = 'gather';
       unit.gatherTarget = command.gatherTarget;
       unit.target = null;
@@ -1841,6 +1979,7 @@ function applyCommand(unit, command) {
       if (unit.type !== 'worker') break;
       const building = entities.find(b => b.id === command.buildTargetId);
       if (!building || building.hp <= 0) break;
+      clearPatrol(unit);
       unit.state = 'build';
       unit.buildTarget = command.buildTargetId;
       unit.target = null;
@@ -1851,6 +1990,21 @@ function applyCommand(unit, command) {
       setUnitPath(unit, bgx, bgy);
       break;
     }
+    case 'patrol':
+      unit.state = 'patrol';
+      unit.target = null;
+      unit.attackTarget = null;
+      unit.gatherTarget = null;
+      unit.buildTarget = null;
+      unit.patrolPointA = { x: unit.x, y: unit.y };
+      unit.patrolPointB = {
+        x: command.targetGrid.gx * CELL + CELL / 2,
+        y: command.targetGrid.gy * CELL + CELL / 2,
+      };
+      unit.patrolToB = true;
+      unit._patrolState = null;
+      setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
+      break;
   }
 }
 
@@ -1860,6 +2014,11 @@ function isCommandValid(command, unit) {
   switch (command.type) {
     case 'move':
       return true;
+    case 'patrol': {
+      if (!command.targetGrid) return false;
+      const { gx, gy } = command.targetGrid;
+      return gx >= 0 && gx < MAP_W && gy >= 0 && gy < MAP_H;
+    }
     case 'attack': {
       const target = entities.find(t => t.id === command.targetId);
       return !!target && target.hp > 0;
@@ -1904,6 +2063,7 @@ function stopSelectedUnits() {
     unit.attackTarget = null;
     unit.gatherTarget = null;
     unit.buildTarget = null;
+    clearPatrol(unit);
     unit.gatherTimer = 0;
     unit.pathRetryFrame = 0;
     stopped++;
@@ -1928,7 +2088,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
     .map(id => entities.find(e => e.id === id))
     .filter(e => e && e.kind === 'building' && e.team === TEAM_PLAYER && e.buildProgress >= e.maxHp);
 
-  if (selectedBuildings.length > 0) {
+  if (!game.commandMode && selectedBuildings.length > 0) {
     const isMineral = mapLayers.resource[gy]?.[gx] === 1;
     const rpType = isMineral ? 'mineral' : 'move';
     for (const b of selectedBuildings) {
@@ -1955,7 +2115,10 @@ function issueCommand(mx, my, isShiftHeld = false) {
   // 构建指令对象
   let command = null;
 
-  if (target && target.team === TEAM_ENEMY) {
+  if (game.commandMode === 'patrol') {
+    command = { type: 'patrol', targetGrid: { gx, gy } };
+    addLog(isShiftHeld ? '排队巡逻' : '开始巡逻');
+  } else if (target && target.team === TEAM_ENEMY) {
     command = { type: 'attack', targetId: target.id };
     addLog(isShiftHeld ? '⚔️ 排队攻击!' : '⚔️ 命令攻击!');
   } else if (mapLayers.resource[gy]?.[gx] === 1) {
@@ -1994,18 +2157,22 @@ function issueCommand(mx, my, isShiftHeld = false) {
     } else {
       // 立即执行：对移动指令计算阵型偏移
       let cmd = command;
-      if (command.type === 'move') {
+      if (command.type === 'move' || command.type === 'patrol') {
         const row = Math.floor(i / cols);
         const col = i % cols;
-        cmd = { type: 'move', targetGrid: clampGrid(gx + col, gy + row) };
+        cmd = { type: command.type, targetGrid: clampGrid(gx + col, gy + row) };
       }
       u.actionQueue = [];
       applyCommand(u, cmd);
     }
   });
 
-  if (command.type === 'move' || command.type === 'gather' || command.type === 'build') {
+  if (command.type === 'move' || command.type === 'gather' || command.type === 'build' || command.type === 'patrol') {
     AudioManager.move();
+  }
+  if (game.commandMode) {
+    game.commandMode = null;
+    updateSidebar();
   }
 }
 
@@ -2205,7 +2372,10 @@ window.addEventListener('keydown', (e) => {
   }
 
   if (e.key === 'Escape') {
-    if (game.buildMode) {
+    if (game.commandMode) {
+      game.commandMode = null;
+      updateSidebar();
+    } else if (game.buildMode) {
       cancelBuild();
     } else {
       const selectedBuilding = game.selected
@@ -2219,7 +2389,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (e.key === 'p' || e.key === 'P') {
+  if (e.key === ' ') {
     e.preventDefault();
     game.paused = !game.paused;
     if (game.paused) game.speedAccumulator = 0;
@@ -2241,6 +2411,12 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Backspace') {
     e.preventDefault();
     setGameSpeed(1);
+    return;
+  }
+
+  if (e.key.toLowerCase() === 'p' && game.selected.length > 0 && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    startPatrolCommand();
     return;
   }
 
@@ -2372,6 +2548,9 @@ function renderMapThumbnail(canvas, mapDef) {
     dot(74, 6, '#f44', 6);   // NE
     dot(6, 54, '#f44', 6);   // SW
     dot(74, 54, '#f44', 6);  // SE
+  } else if (mapDef.id === 'war_canyon') {
+    dot(5, 34, '#0f0', 8);   // 玩家左下基地
+    dot(55, 4, '#f44', 6);   // 敌方右上基地
   } else {
     dot(mapDef.mapW - 5, mapDef.mapH - 5, '#0f0', 8); // 玩家
     dot(4, 4, '#f44', 6); // 敌方
@@ -2439,6 +2618,7 @@ function startGame(mapId) {
 // 开局展示地图选择界面
 showMapSelection();
 </script>
+<script src="enemy_ai.js"></script>
 </body>
 </html>
 
