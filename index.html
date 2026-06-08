@@ -234,6 +234,7 @@ body {
   <span class="hud-item"><span class="hud-label">单位: </span><span class="hud-value" id="hudUnits">0</span></span>
   <span class="hud-item"><span class="hud-label">敌军: </span><span class="hud-value" id="hudEnemies">0</span></span>
   <span class="hud-item"><span class="hud-label">时间: </span><span class="hud-value" id="hudTime">00:00</span></span>
+  <span class="hud-item"><span class="hud-label">速度: </span><span class="hud-value" id="hudSpeed">1x</span></span>
   <span class="hud-item" id="hudIdleWorkers" onclick="selectIdleWorkers()" title="点击选中空闲工人">
     <span class="hud-label">闲置: </span><span class="hud-value" id="hudIdleCount">0</span>
   </span>
@@ -322,6 +323,8 @@ const game = {
   buildPreview: null,
   commandMode: null,
   paused: false,
+  speed: 1,
+  speedAccumulator: 0,
   gameOver: false,
   stats: {
     mineralsGathered: 0,
@@ -1398,12 +1401,25 @@ function renderMinimap() {
 }
 
 // ---- UI更新 ----
+function formatGameSpeed() {
+  return `${Number.isInteger(game.speed) ? game.speed : game.speed.toFixed(1)}x`;
+}
+
+function setGameSpeed(speed) {
+  const nextSpeed = Math.max(0.5, Math.min(3, Math.round(speed * 2) / 2));
+  if (game.speed === nextSpeed) return;
+  game.speed = nextSpeed;
+  game.speedAccumulator = 0;
+  updateHUD();
+}
+
 function updateHUD() {
   document.getElementById('hudMinerals').textContent = game.minerals;
   document.getElementById('hudPop').textContent = `${game.pop}/${game.maxPop}`;
   document.getElementById('hudUnits').textContent = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit').length;
   document.getElementById('hudEnemies').textContent = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0).length;
   document.getElementById('hudTime').textContent = formatTime(game.frame);
+  document.getElementById('hudSpeed').textContent = formatGameSpeed();
   const idleWorkers = entities.filter(e =>
     e.team === TEAM_PLAYER &&
     e.hp > 0 &&
@@ -2373,6 +2389,31 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.key === ' ') {
+    e.preventDefault();
+    game.paused = !game.paused;
+    if (game.paused) game.speedAccumulator = 0;
+    return;
+  }
+
+  if (e.key === '+' || e.key === '=' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+    e.preventDefault();
+    setGameSpeed(game.speed + 0.5);
+    return;
+  }
+
+  if (e.key === '-' || e.code === 'Minus' || e.code === 'NumpadSubtract') {
+    e.preventDefault();
+    setGameSpeed(game.speed - 0.5);
+    return;
+  }
+
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    setGameSpeed(1);
+    return;
+  }
+
   if (e.key.toLowerCase() === 'p' && game.selected.length > 0 && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
     startPatrolCommand();
@@ -2451,7 +2492,15 @@ window.addEventListener('keyup', (e) => {
 // ---- 主循环 ----
 let _gameLoopStarted = false;
 function gameLoop() {
-  update();
+  if (!game.paused && !game.gameOver) {
+    game.speedAccumulator += game.speed;
+    while (game.speedAccumulator >= 1 && !game.gameOver) {
+      update();
+      game.speedAccumulator -= 1;
+    }
+  } else {
+    game.speedAccumulator = 0;
+  }
   render();
   requestAnimationFrame(gameLoop);
 }
@@ -2572,3 +2621,4 @@ showMapSelection();
 <script src="enemy_ai.js"></script>
 </body>
 </html>
+
