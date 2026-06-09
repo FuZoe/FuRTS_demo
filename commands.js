@@ -134,13 +134,20 @@ function getSelectedWorkers() {
     .filter(e => e && e.kind === 'unit' && e.type === 'worker' && e.team === TEAM_PLAYER && e.hp > 0);
 }
 
-function getWorkersBuilding(buildingId) {
+function hasQueuedBuildCommand(worker, buildingId) {
+  return worker.actionQueue?.some(command =>
+    command.type === 'build' &&
+    command.buildTargetId === buildingId
+  );
+}
+
+function getWorkersAssignedToBuild(buildingId) {
   return entities.filter(e =>
     e.kind === 'unit' &&
     e.type === 'worker' &&
     e.team === TEAM_PLAYER &&
     e.hp > 0 &&
-    e.buildTarget === buildingId
+    (e.buildTarget === buildingId || hasQueuedBuildCommand(e, buildingId))
   );
 }
 
@@ -155,7 +162,7 @@ function sortWorkersForBuild(workers, building) {
 
 function assignWorkersToBuild(building, workers, isShiftHeld = false, maxWorkers = 1) {
   if (!building || building.kind !== 'building' || building.team !== TEAM_PLAYER || building.buildProgress >= building.maxHp) return 0;
-  const existingBuilders = getWorkersBuilding(building.id).length;
+  const existingBuilders = getWorkersAssignedToBuild(building.id).length;
   const needed = Math.max(0, maxWorkers - existingBuilders);
   if (needed === 0) return 0;
 
