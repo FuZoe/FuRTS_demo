@@ -1736,7 +1736,7 @@ function updateGuide() {
     html += row('右键敌人', '攻击');
     html += row('H', '驻守');
     if (hasWorker) html += row('右键矿石', '采矿');
-    html += row('S', '停止');
+    html += row('T', '停止');
     html += row('Ctrl+数字', '设置编队');
     html += row('Shift+数字', '追加编队');
     html += row('Alt+数字', '独占编队');
@@ -1957,7 +1957,7 @@ function updateSidebar() {
 
     let btns = '';
     if (selectedEntities.some(isStopCommandTarget)) {
-      btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[S]</span> 停止</button>`;
+      btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[T]</span> 停止</button>`;
     }
     if (selectedEntities.some(e => e.kind === 'unit' && e.team === TEAM_PLAYER)) {
       btns += `<button class="btn" onclick="holdSelectedUnits()"><span class="btn-key">[H]</span> 驻守</button>`;
@@ -2857,7 +2857,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+  if (e.key.toLowerCase() === 't' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
     const hasPlayerUnits = game.selected
       .map(id => entities.find(en => en.id === id))
       .some(isStopCommandTarget);
