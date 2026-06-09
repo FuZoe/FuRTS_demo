@@ -1223,8 +1223,9 @@ function render() {
       // 丧尸系单位保留自身的暗色，便于与普通敌军区分
       const isZombieType = e.type === 'zombie' || e.type === 'berserker' || e.type === 'bloater';
       const uColor = isHitFlashActive(e) ? '#f00' : (e.team === TEAM_PLAYER ? uDef.color : (isZombieType ? uDef.color : '#f44'));
+      const isSelected = game.selected.includes(e.id);
 
-      if (game.selected.includes(e.id)) {
+      if (isSelected) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1283,7 +1284,15 @@ function render() {
         ctx.fillText('P', sx + 10, sy + 10);
       }
 
-      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, game.selected.includes(e.id));
+      drawHpBar(sx - CELL / 2, sy - CELL / 2 - 4, CELL, e.hp, e.maxHp, isSelected);
+
+      if (isSelected && e.actionQueue && e.actionQueue.length > 0) {
+        ctx.fillStyle = '#ff0';
+        ctx.font = 'bold 9px Courier New';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`[${e.actionQueue.length}]`, sx + CELL / 2 + 2, sy - CELL / 2 + 3);
+      }
     }
   }
 
