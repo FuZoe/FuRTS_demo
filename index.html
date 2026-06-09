@@ -657,6 +657,21 @@ function update() {
         }
         break;
       }
+      case 'hold': {
+        const nearby = findNearestHoldTarget(e, def.range);
+        if (nearby && dist(e, nearby) <= def.range * CELL && game.frame % 20 === 0) {
+          nearby.hp -= def.atk;
+          nearby.lastHitFrame = game.frame;
+          if (e.team === TEAM_PLAYER || nearby.team === TEAM_PLAYER) AudioManager.attack();
+          if (nearby.hp <= 0) {
+            recordPlayerKill(e, nearby);
+            const targetDef = nearby.kind === 'building' ? BUILDING_DEFS[nearby.type] : UNIT_DEFS[nearby.type];
+            addLog(`${def.char} 消灭了 ${targetDef?.char || '敌人'}`);
+            checkGameOver();
+          }
+        }
+        break;
+      }
       case 'gather': {
         if (e.carrying >= GATHER_AMOUNT) {
           const base = findNearestBase(e.gx, e.gy, e.team);
@@ -854,6 +869,21 @@ function isEnemyVisibleToPlayer(e) {
     cgy = Math.floor(e.y / CELL);
   }
   return fogMap[cgy]?.[cgx] === FOG_VISIBLE;
+}
+
+function findNearestHoldTarget(unit, range) {
+  let best = null, bestDist = Infinity;
+  const rangePx = range * CELL;
+  for (const e of entities) {
+    if (e.hp <= 0 || e.team === unit.team) continue;
+    if (unit.team === TEAM_PLAYER && e.team === TEAM_ENEMY && !isEnemyVisibleToPlayer(e)) continue;
+    const d = dist(unit, e);
+    if (d < rangePx && d < bestDist) {
+      bestDist = d;
+      best = e;
+    }
+  }
+  return best;
 }
 
 // 「亡者之夜」专属敌方 AI:
@@ -1081,6 +1111,10 @@ function render() {
         ctx.fillStyle = '#f00';
         ctx.font = '9px Courier New';
         ctx.fillText('⚔', sx + 10, sy + 10);
+      } else if (e.state === 'hold') {
+        ctx.fillStyle = '#0ff';
+        ctx.font = '9px Courier New';
+        ctx.fillText('🛡', sx + 10, sy + 10);
       } else if (e.state === 'build') {
         ctx.fillStyle = '#ff0';
         ctx.font = '9px Courier New';
@@ -1544,6 +1578,7 @@ function updateGuide() {
     const hasWorker = sel.some(e => e.type === 'worker');
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
+    html += row('H', '驻守');
     if (hasWorker) html += row('右键矿石', '采矿');
     html += row('S', '停止');
     html += row('Ctrl+数字', '设置编队');
@@ -1737,6 +1772,9 @@ function updateSidebar() {
     let btns = '';
     if (selectedEntities.some(isStopCommandTarget)) {
       btns += `<button class="btn" onclick="stopSelectedUnits()"><span class="btn-key">[S]</span> 停止</button>`;
+    }
+    if (selectedEntities.some(e => e.kind === 'unit' && e.team === TEAM_PLAYER)) {
+      btns += `<button class="btn" onclick="holdSelectedUnits()"><span class="btn-key">[H]</span> 驻守</button>`;
     }
     btns += '<button class="btn" onclick="startPatrolCommand()"><span class="btn-key">[P]</span> 巡逻</button>';
     const hasWorker = selectedEntities.some(e => e.type === 'worker');
@@ -2224,6 +2262,34 @@ function stopSelectedUnits() {
   return stopped;
 }
 
+function holdSelectedUnits() {
+  let heldCount = 0;
+
+  for (const id of game.selected) {
+    const unit = entities.find(en => en.id === id);
+    if (!unit || unit.kind !== 'unit' || unit.team !== TEAM_PLAYER) continue;
+
+    clearPatrol(unit);
+    unit.state = 'hold';
+    unit.actionQueue = [];
+    unit.path = [];
+    unit.target = null;
+    unit.attackTarget = null;
+    unit.gatherTarget = null;
+    unit.buildTarget = null;
+    unit.gatherTimer = 0;
+    unit.pathRetryFrame = 0;
+    heldCount++;
+  }
+
+  if (heldCount > 0) {
+    addLog('🛡 驻守');
+    updateSidebar();
+  }
+
+  return heldCount;
+}
+
 function issueCommand(mx, my, isShiftHeld = false) {
   if (game.selected.length === 0) return;
 
@@ -2552,6 +2618,12 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.altKey && !e.metaKey && game.selected.length > 0) {
+    e.preventDefault();
+    holdSelectedUnits();
+    return;
+  }
+
   if (e.key === ' ') {
     e.preventDefault();
     game.paused = !game.paused;
@@ -2787,4 +2859,3 @@ showMapSelection();
 <script src="enemy_ai.js"></script>
 </body>
 </html>
-
