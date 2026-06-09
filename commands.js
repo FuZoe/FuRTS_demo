@@ -134,14 +134,13 @@ function getSelectedWorkers() {
     .filter(e => e && e.kind === 'unit' && e.type === 'worker' && e.team === TEAM_PLAYER && e.hp > 0);
 }
 
-function getWorkersBuilding(buildingId, excludedIds = new Set()) {
+function getWorkersBuilding(buildingId) {
   return entities.filter(e =>
     e.kind === 'unit' &&
     e.type === 'worker' &&
     e.team === TEAM_PLAYER &&
     e.hp > 0 &&
-    e.buildTarget === buildingId &&
-    !excludedIds.has(e.id)
+    e.buildTarget === buildingId
   );
 }
 
@@ -156,8 +155,7 @@ function sortWorkersForBuild(workers, building) {
 
 function assignWorkersToBuild(building, workers, isShiftHeld = false, maxWorkers = 1) {
   if (!building || building.kind !== 'building' || building.team !== TEAM_PLAYER || building.buildProgress >= building.maxHp) return 0;
-  const selectedWorkerIds = new Set(workers.map(w => w.id));
-  const existingBuilders = getWorkersBuilding(building.id, selectedWorkerIds).length;
+  const existingBuilders = getWorkersBuilding(building.id).length;
   const needed = Math.max(0, maxWorkers - existingBuilders);
   if (needed === 0) return 0;
 
