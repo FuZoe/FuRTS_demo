@@ -128,6 +128,53 @@ function cancelBuild() {
   updateSidebar();
 }
 
+function getSelectedWorkers() {
+  return game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.kind === 'unit' && e.type === 'worker' && e.team === TEAM_PLAYER && e.hp > 0);
+}
+
+function getWorkersBuilding(buildingId, excludedIds = new Set()) {
+  return entities.filter(e =>
+    e.kind === 'unit' &&
+    e.type === 'worker' &&
+    e.team === TEAM_PLAYER &&
+    e.hp > 0 &&
+    e.buildTarget === buildingId &&
+    !excludedIds.has(e.id)
+  );
+}
+
+function sortWorkersForBuild(workers, building) {
+  return [...workers].sort((a, b) => {
+    const aBusy = (a.state === 'build' || a.state === 'attack') ? 1 : 0;
+    const bBusy = (b.state === 'build' || b.state === 'attack') ? 1 : 0;
+    if (aBusy !== bBusy) return aBusy - bBusy;
+    return dist(a, building) - dist(b, building);
+  });
+}
+
+function assignWorkersToBuild(building, workers, isShiftHeld = false, maxWorkers = 1) {
+  if (!building || building.kind !== 'building' || building.team !== TEAM_PLAYER || building.buildProgress >= building.maxHp) return 0;
+  const selectedWorkerIds = new Set(workers.map(w => w.id));
+  const existingBuilders = getWorkersBuilding(building.id, selectedWorkerIds).length;
+  const needed = Math.max(0, maxWorkers - existingBuilders);
+  if (needed === 0) return 0;
+
+  const candidates = sortWorkersForBuild(workers, building).slice(0, needed);
+  const command = { type: 'build', buildTargetId: building.id };
+  for (const worker of candidates) {
+    if (isShiftHeld) {
+      worker.actionQueue.push(command);
+      if (worker.state === 'idle') transitionToIdle(worker);
+    } else {
+      worker.actionQueue = [];
+      applyCommand(worker, command);
+    }
+  }
+  return candidates.length;
+}
+
 function placeBuildingAtMouse(gx, gy) {
   if (!game.buildMode) return;
   if (!canPlaceBuilding(game.buildMode, gx, gy)) {
@@ -140,13 +187,7 @@ function placeBuildingAtMouse(gx, gy) {
   game.minerals -= bDef.cost;
   const building = createBuilding(game.buildMode, gx, gy, TEAM_PLAYER);
 
-  const workers = game.selected
-    .map(id => entities.find(e => e.id === id))
-    .filter(e => e && e.type === 'worker' && e.team === TEAM_PLAYER);
-  if (workers.length > 0) {
-    workers[0].state = 'build';
-    workers[0].buildTarget = building.id;
-  }
+  assignWorkersToBuild(building, getSelectedWorkers());
 
   addLog(`开始建造: ${bDef.desc}`);
   game.buildMode = null;
@@ -488,6 +529,17 @@ function issueCommand(mx, my, isShiftHeld = false) {
       }
     }
     addLog(commandLog.immediate);
+    return;
+  }
+
+  if (command.type === 'build') {
+    const workers = selectedUnits.filter(u => u.type === 'worker');
+    const building = entities.find(b => b.id === command.buildTargetId);
+    const assigned = assignWorkersToBuild(building, workers, isShiftHeld);
+    if (assigned > 0) {
+      addLog(isShiftHeld ? commandLog.queued : commandLog.immediate);
+      AudioManager.move();
+    }
     return;
   }
 
