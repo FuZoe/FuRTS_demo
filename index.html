@@ -314,6 +314,8 @@ const LOG_H = 80;
 const GATHER_AMOUNT = 5;
 const GATHER_TIME = 90;
 const BUILD_RANGE = 3;
+const EDGE_SCROLL_MARGIN = 20;
+const EDGE_SCROLL_SPEED = 6;
 
 // ---- Canvas初始化 ----
 const canvas = document.getElementById('gameCanvas');
@@ -419,6 +421,48 @@ function getUpgradeStatus(key, building = null) {
   }
   if (game.minerals < upgrade.cost) return { available: false, reason: '矿石不足' };
   return { available: true, reason: '' };
+}
+
+// ---- 鼠标边缘滚动 ----
+const mouseScreen = {
+  x: window.innerWidth / 2,
+  y: window.innerHeight / 2,
+  active: false,
+};
+
+document.addEventListener('mousemove', (e) => {
+  mouseScreen.x = e.clientX;
+  mouseScreen.y = e.clientY;
+  mouseScreen.active = true;
+});
+
+document.addEventListener('mouseleave', () => {
+  mouseScreen.active = false;
+});
+
+window.addEventListener('blur', () => {
+  mouseScreen.active = false;
+});
+
+function applyEdgeScroll() {
+  if (!mouseScreen.active) return;
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const visibleLeft = canvasRect.left;
+  const visibleRight = canvasRect.right;
+  const visibleTop = HUD_H;
+  const visibleBottom = window.innerHeight - LOG_H;
+  const mouseInPlayableArea =
+    mouseScreen.x >= visibleLeft &&
+    mouseScreen.x <= visibleRight &&
+    mouseScreen.y >= visibleTop &&
+    mouseScreen.y <= visibleBottom;
+  if (!mouseInPlayableArea) return;
+
+  if (mouseScreen.x < visibleLeft + EDGE_SCROLL_MARGIN) camera.x -= EDGE_SCROLL_SPEED;
+  if (mouseScreen.x > visibleRight - EDGE_SCROLL_MARGIN) camera.x += EDGE_SCROLL_SPEED;
+  if (mouseScreen.y < visibleTop + EDGE_SCROLL_MARGIN) camera.y -= EDGE_SCROLL_SPEED;
+  if (mouseScreen.y > visibleBottom - EDGE_SCROLL_MARGIN) camera.y += EDGE_SCROLL_SPEED;
 }
 
 function clampGrid(gx, gy) {
@@ -594,6 +638,7 @@ function update() {
   if (game.keysDown['ArrowRight'] || game.keysDown['d']) camera.x += game.scrollSpeed;
   if (game.keysDown['ArrowUp'] || game.keysDown['w']) camera.y -= game.scrollSpeed;
   if (game.keysDown['ArrowDown'] || game.keysDown['s']) camera.y += game.scrollSpeed;
+  applyEdgeScroll();
   clampCamera();
 
   for (const e of entities) {
