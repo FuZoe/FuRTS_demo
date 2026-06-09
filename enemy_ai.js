@@ -155,7 +155,10 @@ function enemyAI() {
   for (const w of enemyWorkers) {
     if (w.state === 'idle') {
       const mineral = findNearestMineral(w.gx, w.gy);
-      if (mineral) applyCommand(w, { type: 'gather', gatherTarget: mineral });
+      if (mineral) {
+        applyCommand(w, { type: 'gather', gatherTarget: mineral });
+        w.lastGatherTarget = mineral;
+      }
     }
   }
 
