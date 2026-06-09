@@ -1608,6 +1608,54 @@ function updateSidebar() {
   const first = selectedEntities[0];
 
   if (first.kind === 'building') {
+    const selectedBuildings = selectedEntities.filter(e => e.kind === 'building');
+    const allSelectedAreBuildings = selectedBuildings.length === selectedEntities.length;
+    if (allSelectedAreBuildings && selectedBuildings.length > 1) {
+      const counts = {};
+      let totalQueue = 0;
+      for (const b of selectedBuildings) {
+        counts[b.type] = (counts[b.type] || 0) + 1;
+        totalQueue += b.queue.length;
+      }
+
+      let html = '';
+      for (const [type, count] of Object.entries(counts)) {
+        const bDef = BUILDING_DEFS[type];
+        html += `<span style="color:${bDef.color}">${bDef.char} ${bDef.desc} x${count}</span><br>`;
+      }
+      html += `总队列: ${totalQueue}个`;
+      infoEl.innerHTML = html;
+
+      let btns = '';
+      const productionBuildings = getSelectedProductionBuildings();
+      const hasBase = productionBuildings.some(b => b.type === 'base');
+      const hasBarracks = productionBuildings.some(b => b.type === 'barracks');
+      const hasFactory = productionBuildings.some(b => b.type === 'factory');
+      const producibleTypes = new Set();
+      for (const b of productionBuildings) {
+        const bDef = BUILDING_DEFS[b.type];
+        if (!bDef.produces) continue;
+        for (const uType of bDef.produces) producibleTypes.add(uType);
+      }
+      const keyForUnit = (uType) => {
+        if (uType === 'worker' && hasBase) return '1';
+        if (uType === 'soldier' && !hasBase && hasBarracks) return '1';
+        if (uType === 'ranger' && hasBarracks) return '2';
+        if (uType === 'tank' && hasFactory) return '3';
+        return '';
+      };
+      for (const uType of producibleTypes) {
+        const uDef = UNIT_DEFS[uType];
+        const key = keyForUnit(uType);
+        const keyLabel = key ? `<span class="btn-key">[${key}]</span> ` : '';
+        btns += `<button class="btn" onclick="trainUnit('${uType}')">
+          ${keyLabel}${uDef.char} ${uDef.desc} <span class="cost">${uDef.cost}矿</span>
+        </button>`;
+      }
+      actionsEl.innerHTML = btns;
+      return;
+    }
+
     const bDef = BUILDING_DEFS[first.type];
     let html = `<span style="color:${bDef.color}">${bDef.char} ${bDef.desc}</span><br>`;
     html += `HP: ${first.hp}/${first.maxHp}<br>`;
@@ -1690,9 +1738,26 @@ function updateSidebar() {
 }
 
 // ---- 操作命令 ----
+function getSelectedProductionBuildings(type = null) {
+  return game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => {
+      if (!e || e.kind !== 'building' || e.team !== TEAM_PLAYER || e.buildProgress < e.maxHp) return false;
+      const bDef = BUILDING_DEFS[e.type];
+      return bDef.produces && (!type || bDef.produces.includes(type));
+    });
+}
+
+function getShortestQueueBuilding(type) {
+  return getSelectedProductionBuildings(type)
+    .sort((a, b) => a.queue.length - b.queue.length)[0];
+}
+
 function trainUnit(type, buildingId) {
-  const building = entities.find(e => e.id === buildingId);
+  const building = buildingId ? entities.find(e => e.id === buildingId) : getShortestQueueBuilding(type);
   if (!building) return;
+  const bDef = BUILDING_DEFS[building.type];
+  if (building.kind !== 'building' || building.team !== TEAM_PLAYER || building.buildProgress < building.maxHp || !bDef.produces?.includes(type)) return;
   const uDef = UNIT_DEFS[type];
   if (game.minerals < uDef.cost) { addLog('矿石不足！'); AudioManager.error(); return; }
   if (game.pop + uDef.popCost > game.maxPop) { addLog('人口上限！需要建造人口房。'); AudioManager.error(); return; }
@@ -1933,11 +1998,25 @@ function boxSelect(start, end, additive) {
 
   if (!additive) game.selected = [];
 
+  const unitsInBox = [];
+  const buildingsInBox = [];
   for (const e of entities) {
-    if (e.hp <= 0 || e.team !== TEAM_PLAYER || e.kind !== 'unit') continue;
-    if (e.x >= x1 && e.x <= x2 && e.y >= y1 && e.y <= y2) {
-      if (!game.selected.includes(e.id)) game.selected.push(e.id);
+    if (e.hp <= 0 || e.team !== TEAM_PLAYER) continue;
+    if (e.kind === 'unit') {
+      if (e.x >= x1 && e.x <= x2 && e.y >= y1 && e.y <= y2) unitsInBox.push(e);
+    } else if (e.kind === 'building') {
+      const bDef = BUILDING_DEFS[e.type];
+      const left = e.gx * CELL;
+      const top = e.gy * CELL;
+      const right = left + bDef.w * CELL;
+      const bottom = top + bDef.h * CELL;
+      if (right >= x1 && left <= x2 && bottom >= y1 && top <= y2) buildingsInBox.push(e);
     }
+  }
+
+  const picked = unitsInBox.length > 0 ? unitsInBox : buildingsInBox;
+  for (const e of picked) {
+    if (!game.selected.includes(e.id)) game.selected.push(e.id);
   }
 }
 
@@ -2525,21 +2604,24 @@ window.addEventListener('keydown', (e) => {
   // 数字键: 先尝试原有快捷键，无效则召回编队
   if (isNum && !e.ctrlKey && !e.shiftKey && !e.altKey) {
     const sel = game.selected.map(id => entities.find(en => en.id === id)).filter(Boolean);
-    const selBuilding = sel.find(s => s.kind === 'building' && s.team === TEAM_PLAYER);
+    const selectedBuildings = getSelectedProductionBuildings();
+    const hasBase = selectedBuildings.some(s => s.type === 'base');
+    const hasBarracks = selectedBuildings.some(s => s.type === 'barracks');
+    const hasFactory = selectedBuildings.some(s => s.type === 'factory');
     const hasWorker = sel.some(s => s.type === 'worker' && s.team === TEAM_PLAYER);
     let handled = false;
 
     if (numKey === 1) {
-      if (selBuilding && selBuilding.type === 'base') { trainUnit('worker', selBuilding.id); handled = true; }
-      else if (selBuilding && selBuilding.type === 'barracks') { trainUnit('soldier', selBuilding.id); handled = true; }
+      if (hasBase) { trainUnit('worker'); handled = true; }
+      else if (hasBarracks) { trainUnit('soldier'); handled = true; }
     }
     if (numKey === 2) {
       if (hasWorker) { startBuild('barracks'); handled = true; }
-      else if (selBuilding && selBuilding.type === 'barracks') { trainUnit('ranger', selBuilding.id); handled = true; }
+      else if (hasBarracks) { trainUnit('ranger'); handled = true; }
     }
     if (numKey === 3) {
       if (hasWorker) { startBuild('factory'); handled = true; }
-      else if (selBuilding && selBuilding.type === 'factory') { trainUnit('tank', selBuilding.id); handled = true; }
+      else if (hasFactory) { trainUnit('tank'); handled = true; }
     }
     if (numKey === 4) {
       if (hasWorker) { startBuild('supply'); handled = true; }
