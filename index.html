@@ -234,6 +234,7 @@ body {
   <span class="hud-item"><span class="hud-label">单位: </span><span class="hud-value" id="hudUnits">0</span></span>
   <span class="hud-item"><span class="hud-label">敌军: </span><span class="hud-value" id="hudEnemies">0</span></span>
   <span class="hud-item"><span class="hud-label">时间: </span><span class="hud-value" id="hudTime">00:00</span></span>
+  <span class="hud-item"><span class="hud-label">速度: </span><span class="hud-value" id="hudSpeed">1x</span></span>
   <span class="hud-item" id="hudIdleWorkers" onclick="selectIdleWorkers()" title="点击选中空闲工人">
     <span class="hud-label">闲置: </span><span class="hud-value" id="hudIdleCount">0</span>
   </span>
@@ -293,13 +294,40 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // ---- 相机 ----
-const camera = { x: 0, y: 0 };
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.0;
+const ZOOM_STEP = 1.1;
+const camera = { x: 0, y: 0, zoom: 1.0 };
+
+function getViewportWorldWidth() {
+  return canvas.width / camera.zoom;
+}
+
+function getViewportWorldHeight(includeLog = true) {
+  const screenHeight = includeLog ? canvas.height : canvas.height - LOG_H;
+  return screenHeight / camera.zoom;
+}
+
+function screenToWorld(sx, sy) {
+  return {
+    x: sx / camera.zoom + camera.x,
+    y: sy / camera.zoom + camera.y,
+  };
+}
+
+function isWorldPointOnScreen(wx, wy, padding = CELL) {
+  return wx >= camera.x - padding &&
+    wx <= camera.x + getViewportWorldWidth() + padding &&
+    wy >= camera.y - padding &&
+    wy <= camera.y + getViewportWorldHeight() + padding;
+}
 function clampCamera() {
-  const maxX = MAP_W * CELL - canvas.width;
-  const maxY = MAP_H * CELL - canvas.height + LOG_H;
+  const maxX = MAP_W * CELL - getViewportWorldWidth();
+  const maxY = MAP_H * CELL - getViewportWorldHeight(false);
   camera.x = Math.max(0, Math.min(camera.x, maxX));
   camera.y = Math.max(0, Math.min(camera.y, maxY));
 }
+window.addEventListener('resize', clampCamera);
 
 function clampGrid(gx, gy) {
   return {
@@ -322,6 +350,8 @@ const game = {
   buildPreview: null,
   commandMode: null,
   paused: false,
+  speed: 1,
+  speedAccumulator: 0,
   gameOver: false,
   stats: {
     mineralsGathered: 0,
@@ -381,8 +411,8 @@ function setupGameForMap(mapDef) {
 
   // 移动相机到玩家基地
   resizeCanvas();
-  camera.x = playerBase.x - canvas.width / 2;
-  camera.y = playerBase.y - canvas.height / 2;
+  camera.x = playerBase.x - getViewportWorldWidth() / 2;
+  camera.y = playerBase.y - getViewportWorldHeight(false) / 2;
   clampCamera();
 
   // 初始化时立即计算一次视野, 避免开局第一帧前画面全黑
@@ -922,10 +952,13 @@ function render() {
   ctx.fillStyle = '#111';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  ctx.save();
+  ctx.scale(camera.zoom, camera.zoom);
+
   const startGX = Math.floor(camera.x / CELL);
   const startGY = Math.floor(camera.y / CELL);
-  const endGX = Math.min(MAP_W, startGX + Math.ceil(canvas.width / CELL) + 1);
-  const endGY = Math.min(MAP_H, startGY + Math.ceil(canvas.height / CELL) + 1);
+  const endGX = Math.min(MAP_W, startGX + Math.ceil(getViewportWorldWidth() / CELL) + 1);
+  const endGY = Math.min(MAP_H, startGY + Math.ceil(getViewportWorldHeight() / CELL) + 1);
 
   // 绘制网格和地形（分层渲染）
   ctx.font = `${CELL - 4}px Courier New`;
@@ -990,7 +1023,7 @@ function render() {
     const sx = e.x - camera.x;
     const sy = e.y - camera.y;
 
-    if (sx < -CELL * 3 || sx > canvas.width + CELL * 3 || sy < -CELL * 3 || sy > canvas.height + CELL * 3) continue;
+    if (sx < -CELL * 3 || sx > getViewportWorldWidth() + CELL * 3 || sy < -CELL * 3 || sy > getViewportWorldHeight() + CELL * 3) continue;
 
     // 战争迷雾: 敌方实体仅在视野格内才渲染
     if (!isEnemyVisibleToPlayer(e)) continue;
@@ -1253,13 +1286,13 @@ function render() {
   // 框选框
   if (game.dragStart && game.dragEnd) {
     ctx.strokeStyle = '#0f0';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1 / camera.zoom;
+    ctx.setLineDash([4 / camera.zoom, 4 / camera.zoom]);
     const rx = Math.min(game.dragStart.x, game.dragEnd.x);
     const ry = Math.min(game.dragStart.y, game.dragEnd.y);
     const rw = Math.abs(game.dragEnd.x - game.dragStart.x);
     const rh = Math.abs(game.dragEnd.y - game.dragStart.y);
-    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.strokeRect(rx / camera.zoom, ry / camera.zoom, rw / camera.zoom, rh / camera.zoom);
     ctx.setLineDash([]);
   }
 
@@ -1285,6 +1318,8 @@ function render() {
   }
 
   // 游戏结束覆盖层
+  ctx.restore();
+
   if (game.gameOver) {
     const isDefeat = entities.filter(e => e.team === TEAM_PLAYER && e.kind === 'building' && e.type === 'base' && e.hp > 0).length === 0;
     const panelW = Math.min(460, canvas.width - 48);
@@ -1424,20 +1459,33 @@ function renderMinimap() {
 
   const vx = (camera.x / (MAP_W * CELL)) * mw;
   const vy = (camera.y / (MAP_H * CELL)) * mh;
-  const vw = (canvas.width / (MAP_W * CELL)) * mw;
-  const vh = ((canvas.height - LOG_H) / (MAP_H * CELL)) * mh;
+  const vw = (getViewportWorldWidth() / (MAP_W * CELL)) * mw;
+  const vh = (getViewportWorldHeight(false) / (MAP_H * CELL)) * mh;
   mmCtx.strokeStyle = '#fff';
   mmCtx.lineWidth = 1;
   mmCtx.strokeRect(vx, vy, vw, vh);
 }
 
 // ---- UI更新 ----
+function formatGameSpeed() {
+  return `${Number.isInteger(game.speed) ? game.speed : game.speed.toFixed(1)}x`;
+}
+
+function setGameSpeed(speed) {
+  const nextSpeed = Math.max(0.5, Math.min(3, Math.round(speed * 2) / 2));
+  if (game.speed === nextSpeed) return;
+  game.speed = nextSpeed;
+  game.speedAccumulator = 0;
+  updateHUD();
+}
+
 function updateHUD() {
   document.getElementById('hudMinerals').textContent = game.minerals;
   document.getElementById('hudPop').textContent = `${game.pop}/${game.maxPop}`;
   document.getElementById('hudUnits').textContent = entities.filter(e => e.team === TEAM_PLAYER && e.hp > 0 && e.kind === 'unit').length;
   document.getElementById('hudEnemies').textContent = entities.filter(e => e.team === TEAM_ENEMY && e.hp > 0).length;
   document.getElementById('hudTime').textContent = formatTime(game.frame);
+  document.getElementById('hudSpeed').textContent = formatGameSpeed();
   const idleWorkers = entities.filter(e =>
     e.team === TEAM_PLAYER &&
     e.hp > 0 &&
@@ -1495,6 +1543,7 @@ function updateGuide() {
     html += row('数字键', '召回编队');
     html += row('F1', '选中空闲工人');
     html += row('Tab', '子组切换');
+    html += row('滚轮', '缩放视角');
     html += row('WASD', '滚动地图');
     html += row('目标', '摧毁左上敌方基地');
     html += '</div>';
@@ -1524,6 +1573,7 @@ function updateGuide() {
   }
 
   html += row('WASD', '滚动地图');
+  html += row('滚轮', '缩放视角');
   html += '</div>';
   guideEl.innerHTML = html;
 }
@@ -1773,8 +1823,9 @@ canvas.addEventListener('mousedown', (e) => {
       return;
     }
     if (game.buildMode) {
-      const gx = Math.floor((mx + camera.x) / CELL);
-      const gy = Math.floor((my + camera.y) / CELL);
+      const world = screenToWorld(mx, my);
+      const gx = Math.floor(world.x / CELL);
+      const gy = Math.floor(world.y / CELL);
       placeBuildingAtMouse(gx, gy);
       return;
     }
@@ -1801,9 +1852,10 @@ canvas.addEventListener('mousemove', (e) => {
   const my = e.offsetY;
 
   if (game.buildMode) {
+    const world = screenToWorld(mx, my);
     game.buildPreview = {
-      gx: Math.floor((mx + camera.x) / CELL),
-      gy: Math.floor((my + camera.y) / CELL),
+      gx: Math.floor(world.x / CELL),
+      gy: Math.floor(world.y / CELL),
     };
   }
 
@@ -1820,8 +1872,9 @@ canvas.addEventListener('mouseup', (e) => {
     const dy = Math.abs(my - game.dragStart.y);
 
     if (dx < 5 && dy < 5) {
-      const gx = Math.floor((mx + camera.x) / CELL);
-      const gy = Math.floor((my + camera.y) / CELL);
+      const world = screenToWorld(mx, my);
+      const gx = Math.floor(world.x / CELL);
+      const gy = Math.floor(world.y / CELL);
 
       // Double-click: select all same type on screen
       const now = Date.now();
@@ -1839,9 +1892,7 @@ canvas.addEventListener('mouseup', (e) => {
           for (const ent of entities) {
             if (ent.hp <= 0 || ent.team !== TEAM_PLAYER || ent.kind !== 'unit') continue;
             if (ent.type !== target.type) continue;
-            const sx = ent.x - camera.x;
-            const sy = ent.y - camera.y;
-            if (sx >= -CELL && sx <= canvas.width + CELL && sy >= -CELL && sy <= canvas.height + CELL) {
+            if (isWorldPointOnScreen(ent.x, ent.y)) {
               if (!game.selected.includes(ent.id)) game.selected.push(ent.id);
             }
           }
@@ -1865,6 +1916,22 @@ document.addEventListener('contextmenu', (e) => {
   return false;
 }, { capture: true });
 
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+
+  const mx = e.offsetX;
+  const my = e.offsetY;
+  const beforeZoomWorld = screenToWorld(mx, my);
+  const zoomFactor = e.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
+  const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom * zoomFactor));
+  if (nextZoom === camera.zoom) return;
+
+  camera.zoom = nextZoom;
+  camera.x = beforeZoomWorld.x - mx / camera.zoom;
+  camera.y = beforeZoomWorld.y - my / camera.zoom;
+  clampCamera();
+}, { passive: false });
+
 function selectAt(gx, gy, additive, ctrlKey) {
   const target = entityAt(gx, gy);
 
@@ -1875,9 +1942,7 @@ function selectAt(gx, gy, additive, ctrlKey) {
       if (e.hp <= 0 || e.team !== TEAM_PLAYER || e.kind !== 'unit') continue;
       if (e.type !== target.type) continue;
       // Check if on screen
-      const sx = e.x - camera.x;
-      const sy = e.y - camera.y;
-      if (sx >= -CELL && sx <= canvas.width + CELL && sy >= -CELL && sy <= canvas.height + CELL) {
+      if (isWorldPointOnScreen(e.x, e.y)) {
         if (!game.selected.includes(e.id)) game.selected.push(e.id);
       }
     }
@@ -1897,10 +1962,12 @@ function selectAt(gx, gy, additive, ctrlKey) {
 }
 
 function boxSelect(start, end, additive) {
-  const x1 = Math.min(start.x, end.x) + camera.x;
-  const y1 = Math.min(start.y, end.y) + camera.y;
-  const x2 = Math.max(start.x, end.x) + camera.x;
-  const y2 = Math.max(start.y, end.y) + camera.y;
+  const worldStart = screenToWorld(start.x, start.y);
+  const worldEnd = screenToWorld(end.x, end.y);
+  const x1 = Math.min(worldStart.x, worldEnd.x);
+  const y1 = Math.min(worldStart.y, worldEnd.y);
+  const x2 = Math.max(worldStart.x, worldEnd.x);
+  const y2 = Math.max(worldStart.y, worldEnd.y);
 
   if (!additive) game.selected = [];
 
@@ -2130,8 +2197,9 @@ function holdSelectedUnits() {
 function issueCommand(mx, my, isShiftHeld = false) {
   if (game.selected.length === 0) return;
 
-  const gx = Math.floor((mx + camera.x) / CELL);
-  const gy = Math.floor((my + camera.y) / CELL);
+  const world = screenToWorld(mx, my);
+  const gx = Math.floor(world.x / CELL);
+  const gy = Math.floor(world.y / CELL);
 
   // 选中己方已建造完成的建筑时，右键设置集结点
   const selectedBuildings = game.selected
@@ -2164,21 +2232,23 @@ function issueCommand(mx, my, isShiftHeld = false) {
 
   // 构建指令对象
   let command = null;
+  let commandLog = null;
 
   if (game.commandMode === 'patrol') {
     command = { type: 'patrol', targetGrid: { gx, gy } };
-    addLog(isShiftHeld ? '排队巡逻' : '开始巡逻');
+    commandLog = { queued: '排队巡逻', immediate: '开始巡逻' };
   } else if (target && target.team === TEAM_ENEMY) {
     command = { type: 'attack', targetId: target.id };
-    addLog(isShiftHeld ? '⚔️ 排队攻击!' : '⚔️ 命令攻击!');
+    commandLog = { queued: '⚔️ 排队攻击', immediate: '⚔️ 命令攻击!' };
   } else if (mapLayers.resource[gy]?.[gx] === 1) {
     command = { type: 'gather', gatherTarget: { gx, gy } };
-    addLog(isShiftHeld ? '⛏️ 排队采矿' : '⛏️ 前往采矿');
+    commandLog = { queued: '⛏️ 排队采矿', immediate: '⛏️ 前往采矿' };
   } else if (target && target.kind === 'building' && target.team === TEAM_PLAYER && target.buildProgress < target.maxHp) {
     command = { type: 'build', buildTargetId: target.id };
-    addLog(isShiftHeld ? '🔨 排队建造' : '🔨 前往建造');
+    commandLog = { queued: '🔨 排队建造', immediate: '🔨 前往建造' };
   } else {
     command = { type: 'move', targetGrid: { gx, gy } };
+    commandLog = { queued: '🚶 排队移动', immediate: null };
   }
 
   // 采矿指令立即执行时，使用分散采矿逻辑（工人均匀分配到不同矿格）
@@ -2191,6 +2261,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
         distributeWorkersToMinerals(workers, mineralCells);
       }
     }
+    addLog(commandLog.immediate);
     return;
   }
 
@@ -2217,6 +2288,18 @@ function issueCommand(mx, my, isShiftHeld = false) {
     }
   });
 
+  if (isShiftHeld) {
+    const leader = selectedUnits.find(u => isCommandValid(command, u));
+    if (leader) {
+      const queueLength = leader.actionQueue.length + (leader.state !== 'idle' ? 1 : 0);
+      addLog(`${commandLog.queued} (队列: ${queueLength}个任务)`);
+    } else {
+      addLog(commandLog.queued);
+    }
+  } else if (commandLog.immediate) {
+    addLog(commandLog.immediate);
+  }
+
   if (command.type === 'move' || command.type === 'gather' || command.type === 'build' || command.type === 'patrol') {
     AudioManager.move();
   }
@@ -2242,8 +2325,8 @@ function minimapEventToPosition(e) {
 // 小地图点击
 mmCanvas.addEventListener('click', (e) => {
   const { worldX, worldY } = minimapEventToPosition(e);
-  camera.x = worldX - canvas.width / 2;
-  camera.y = worldY - canvas.height / 2;
+  camera.x = worldX - getViewportWorldWidth() / 2;
+  camera.y = worldY - getViewportWorldHeight(false) / 2;
   clampCamera();
 });
 
@@ -2332,8 +2415,8 @@ function recallControlGroup(num) {
   const units = alive.map(id => entities.find(e => e.id === id)).filter(Boolean);
   const cx = units.reduce((s, u) => s + u.x, 0) / units.length;
   const cy = units.reduce((s, u) => s + u.y, 0) / units.length;
-  camera.x = cx - canvas.width / 2;
-  camera.y = cy - canvas.height / 2;
+  camera.x = cx - getViewportWorldWidth() / 2;
+  camera.y = cy - getViewportWorldHeight(false) / 2;
   clampCamera();
   updateSidebar();
   return true;
@@ -2445,6 +2528,31 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.key === ' ') {
+    e.preventDefault();
+    game.paused = !game.paused;
+    if (game.paused) game.speedAccumulator = 0;
+    return;
+  }
+
+  if (e.key === '+' || e.key === '=' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+    e.preventDefault();
+    setGameSpeed(game.speed + 0.5);
+    return;
+  }
+
+  if (e.key === '-' || e.code === 'Minus' || e.code === 'NumpadSubtract') {
+    e.preventDefault();
+    setGameSpeed(game.speed - 0.5);
+    return;
+  }
+
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    setGameSpeed(1);
+    return;
+  }
+
   if (e.key.toLowerCase() === 'p' && game.selected.length > 0 && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
     startPatrolCommand();
@@ -2523,7 +2631,15 @@ window.addEventListener('keyup', (e) => {
 // ---- 主循环 ----
 let _gameLoopStarted = false;
 function gameLoop() {
-  update();
+  if (!game.paused && !game.gameOver) {
+    game.speedAccumulator += game.speed;
+    while (game.speedAccumulator >= 1 && !game.gameOver) {
+      update();
+      game.speedAccumulator -= 1;
+    }
+  } else {
+    game.speedAccumulator = 0;
+  }
   render();
   requestAnimationFrame(gameLoop);
 }
