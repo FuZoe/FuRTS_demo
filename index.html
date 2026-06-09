@@ -1146,26 +1146,43 @@ function render() {
   {
     const selectedWithQueue = game.selected
       .map(id => entities.find(en => en.id === id))
-      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || (u.state === 'move' && u.target)));
+      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || (u.state === 'move' && u.target) || (u.state === 'attack' && u.attackTarget) || (u.state === 'gather' && u.gatherTarget) || (u.state === 'build' && u.buildTarget)));
 
     if (selectedWithQueue.length > 0) {
-      ctx.strokeStyle = '#ff0';
+      const commandColors = {
+        move: '#ff0',
+        attack: '#f44',
+        gather: '#4af',
+        build: '#4f4',
+        patrol: '#c6f',
+      };
+      const colorForCommand = (type) => commandColors[type] || commandColors.move;
+
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
 
-      // 用leader的队列作为共享路标（index 0 无阵型偏移，即原始点击位置）
       const leader = selectedWithQueue[0];
-
-      // 预计算leader队列的各路标屏幕坐标
       const waypoints = [];
 
-      // 将当前正在执行的目标也加入路标（避免已出队的第一个路标"消失"导致视觉跳跃）
       if (leader.state === 'move' && leader.target) {
-        waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y });
+        waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y, color: colorForCommand('move') });
+      } else if (leader.state === 'attack' && leader.attackTarget) {
+        const at = entities.find(t => t.id === leader.attackTarget);
+        if (at) waypoints.push({ x: at.x - camera.x, y: at.y - camera.y, color: colorForCommand('attack') });
+      } else if (leader.state === 'gather' && leader.gatherTarget) {
+        waypoints.push({
+          x: leader.gatherTarget.gx * CELL + CELL / 2 - camera.x,
+          y: leader.gatherTarget.gy * CELL + CELL / 2 - camera.y,
+          color: colorForCommand('gather'),
+        });
+      } else if (leader.state === 'build' && leader.buildTarget) {
+        const bt = entities.find(b => b.id === leader.buildTarget);
+        if (bt) waypoints.push({ x: bt.x - camera.x, y: bt.y - camera.y, color: colorForCommand('build') });
       }
 
       for (const cmd of leader.actionQueue) {
         let nx, ny;
+        const color = colorForCommand(cmd.type);
         if (cmd.type === 'move' || cmd.type === 'patrol') {
           nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
           ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
@@ -1181,15 +1198,15 @@ function render() {
           if (!bt) continue;
           nx = bt.x - camera.x; ny = bt.y - camera.y;
         } else { continue; }
-        waypoints.push({ x: nx, y: ny });
+        waypoints.push({ x: nx, y: ny, color });
       }
 
-      // 为每个单位画路径线（起点吸附在单位实时位置，终点汇聚到leader路标）
       for (const unit of selectedWithQueue) {
         let prevX = unit.x - camera.x;
         let prevY = unit.y - camera.y;
 
         for (const wp of waypoints) {
+          ctx.strokeStyle = wp.color;
           ctx.beginPath();
           ctx.moveTo(prevX, prevY);
           ctx.lineTo(wp.x, wp.y);
@@ -1198,9 +1215,9 @@ function render() {
           prevY = wp.y;
         }
       }
-      // 黄点画在每个路标位置（复用waypoints数组）
-      ctx.fillStyle = '#ff0';
+
       for (const wp of waypoints) {
+        ctx.fillStyle = wp.color;
         ctx.beginPath();
         ctx.arc(wp.x, wp.y, 4, 0, Math.PI * 2);
         ctx.fill();
