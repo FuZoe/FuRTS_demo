@@ -485,6 +485,8 @@ const game = {
   dragEnd: null,
   buildMode: null,
   buildPreview: null,
+  attackMoveMode: false,
+  attackMoveQueued: false,
   commandMode: null,
   paused: false,
   speed: 1,
@@ -728,6 +730,32 @@ function update() {
         }
         break;
       }
+      case 'attackMove': {
+        const nearby = findNearestEnemy(e, stats.range + 2);
+        if (nearby) {
+          e.attackTarget = nearby.id;
+          e._attackMoveTarget = e.target;
+          e.state = 'attack';
+          e.path = [];
+          e.pathRetryFrame = 0;
+          break;
+        }
+        if (!e.target) { transitionToIdle(e); break; }
+        if (e.path.length > 0) {
+          const arrived = followPath(e, speed);
+          if (arrived) {
+            e.target = null;
+            transitionToIdle(e);
+          }
+        } else {
+          const arrived = moveToward(e, e.target.x, e.target.y, speed);
+          if (arrived) {
+            e.target = null;
+            transitionToIdle(e);
+          }
+        }
+        break;
+      }
       case 'patrol': {
         const nearby = findNearestEnemy(e, stats.range + 2);
         if (nearby) {
@@ -776,7 +804,14 @@ function update() {
         if (!target || target.hp <= 0) {
           e.attackTarget = null;
           e.path = [];
-          resumePatrolOrIdle(e);
+          if (e._attackMoveTarget) {
+            e.target = e._attackMoveTarget;
+            e._attackMoveTarget = null;
+            e.state = 'attackMove';
+            setUnitPath(e, Math.floor(e.target.x / CELL), Math.floor(e.target.y / CELL));
+          } else {
+            resumePatrolOrIdle(e);
+          }
           break;
         }
         const d = dist(e, target);
@@ -804,7 +839,14 @@ function update() {
               recordPlayerKill(e, target);
               addLog(`${def.char} 消灭了 ${target.kind === 'building' ? BUILDING_DEFS[target.type].char : UNIT_DEFS[target.type].char}`);
               e.attackTarget = null;
-              resumePatrolOrIdle(e);
+              if (e._attackMoveTarget) {
+                e.target = e._attackMoveTarget;
+                e._attackMoveTarget = null;
+                e.state = 'attackMove';
+                setUnitPath(e, Math.floor(e.target.x / CELL), Math.floor(e.target.y / CELL));
+              } else {
+                resumePatrolOrIdle(e);
+              }
               checkGameOver();
             }
           }
@@ -1336,11 +1378,12 @@ function render() {
   {
     const selectedWithQueue = game.selected
       .map(id => entities.find(en => en.id === id))
-      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || (u.state === 'move' && u.target) || (u.state === 'attack' && u.attackTarget) || (u.state === 'gather' && u.gatherTarget) || (u.state === 'build' && u.buildTarget)));
+      .filter(u => u && u.kind === 'unit' && (u.actionQueue.length > 0 || ((u.state === 'move' || u.state === 'attackMove') && u.target) || (u.state === 'attack' && u.attackTarget) || (u.state === 'gather' && u.gatherTarget) || (u.state === 'build' && u.buildTarget)));
 
     if (selectedWithQueue.length > 0) {
       const commandColors = {
         move: '#ff0',
+        attackMove: '#f44',
         attack: '#f44',
         gather: '#4af',
         build: '#4f4',
@@ -1354,8 +1397,9 @@ function render() {
       const leader = selectedWithQueue[0];
       const waypoints = [];
 
-      if (leader.state === 'move' && leader.target) {
-        waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y, color: colorForCommand('move') });
+      if ((leader.state === 'move' || leader.state === 'attackMove') && leader.target) {
+        const type = leader.state === 'attackMove' ? 'attackMove' : 'move';
+        waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y, color: colorForCommand(type) });
       } else if (leader.state === 'attack' && leader.attackTarget) {
         const at = entities.find(t => t.id === leader.attackTarget);
         if (at) waypoints.push({ x: at.x - camera.x, y: at.y - camera.y, color: colorForCommand('attack') });
@@ -1373,7 +1417,7 @@ function render() {
       for (const cmd of leader.actionQueue) {
         let nx, ny;
         const color = colorForCommand(cmd.type);
-        if (cmd.type === 'move' || cmd.type === 'patrol') {
+        if (cmd.type === 'move' || cmd.type === 'attackMove' || cmd.type === 'patrol') {
           nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
           ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
         } else if (cmd.type === 'attack') {
@@ -1682,6 +1726,15 @@ function updateGuide() {
   const row = (k, v) => `<div class="guide-row"><span class="guide-key">${k}</span><span class="guide-desc">${v}</span></div>`;
   let html = '';
 
+  if (game.attackMoveMode) {
+    html += '<div class="guide-section">';
+    html += row('左键', game.attackMoveQueued ? '排队攻击移动' : '攻击移动');
+    html += row('右键/Esc', '取消攻击移动');
+    html += '</div>';
+    guideEl.innerHTML = html;
+    return;
+  }
+
   if (game.buildMode) {
     html += '<div class="guide-section">';
     html += row('左键', '放置建筑');
@@ -1734,6 +1787,8 @@ function updateGuide() {
     const hasWorker = sel.some(e => e.type === 'worker');
     html += row('右键空地', '移动');
     html += row('右键敌人', '攻击');
+    html += row('A', '攻击移动');
+    html += row('Shift+A', '排队攻击移动');
     html += row('H', '驻守');
     if (hasWorker) html += row('右键矿石', '采矿');
     html += row('T', '停止');
@@ -2101,6 +2156,44 @@ function startPatrolCommand() {
   updateSidebar();
 }
 
+function setAttackMoveMode(enabled, queued = false) {
+  game.attackMoveMode = enabled;
+  game.attackMoveQueued = enabled && queued;
+  canvas.style.cursor = enabled ? 'crosshair' : '';
+  updateSidebar();
+}
+
+function issueAttackMoveCommand(mx, my, isShiftHeld = false) {
+  if (game.selected.length === 0) return;
+  const gx = Math.floor((mx + camera.x) / CELL);
+  const gy = Math.floor((my + camera.y) / CELL);
+  const selectedUnits = game.selected
+    .map(id => entities.find(e => e.id === id))
+    .filter(e => e && e.kind === 'unit' && e.team === TEAM_PLAYER);
+  if (selectedUnits.length === 0) return;
+
+  const count = selectedUnits.length;
+  const cols = Math.ceil(Math.sqrt(count));
+  selectedUnits.forEach((u, i) => {
+    let command = { type: 'attackMove', targetGrid: { gx, gy } };
+    if (!isShiftHeld) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      command = { type: 'attackMove', targetGrid: clampGrid(gx + col, gy + row) };
+    }
+
+    if (isShiftHeld) {
+      u.actionQueue.push(command);
+      if (u.state === 'idle') transitionToIdle(u);
+    } else {
+      u.actionQueue = [];
+      applyCommand(u, command);
+    }
+  });
+
+  addLog(isShiftHeld ? '⚔️ 排队攻击移动' : '⚔️ 攻击移动');
+}
+
 function cancelBuild() {
   game.buildMode = null;
   game.buildPreview = null;
@@ -2151,11 +2244,20 @@ canvas.addEventListener('mousedown', (e) => {
       placeBuildingAtMouse(gx, gy);
       return;
     }
+    if (game.attackMoveMode) {
+      issueAttackMoveCommand(mx, my, game.attackMoveQueued || e.shiftKey);
+      setAttackMoveMode(false);
+      return;
+    }
     game.dragStart = { x: mx, y: my };
     game.dragEnd = null;
   }
   if (e.button === 2) {
     e.preventDefault();
+    if (game.attackMoveMode) {
+      setAttackMoveMode(false);
+      return;
+    }
     if (game.commandMode) {
       game.commandMode = null;
       updateSidebar();
@@ -2373,6 +2475,20 @@ function applyCommand(unit, command) {
         y: command.targetGrid.gy * CELL + CELL / 2,
       };
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
+      unit.gatherTarget = null;
+      unit.buildTarget = null;
+      setUnitPath(unit, command.targetGrid.gx, command.targetGrid.gy);
+      break;
+    case 'attackMove':
+      clearPatrol(unit);
+      unit.state = 'attackMove';
+      unit.target = {
+        x: command.targetGrid.gx * CELL + CELL / 2,
+        y: command.targetGrid.gy * CELL + CELL / 2,
+      };
+      unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.gatherTarget = null;
       unit.lastGatherTarget = null;
       unit.buildTarget = null;
@@ -2384,6 +2500,7 @@ function applyCommand(unit, command) {
       clearPatrol(unit);
       unit.state = 'attack';
       unit.attackTarget = command.targetId;
+      unit._attackMoveTarget = null;
       unit.target = null;
       unit.gatherTarget = null;
       unit.lastGatherTarget = null;
@@ -2400,6 +2517,7 @@ function applyCommand(unit, command) {
       unit.lastGatherTarget = command.gatherTarget;
       unit.target = null;
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.buildTarget = null;
       unit.gatherTimer = 0;
       setUnitPath(unit, command.gatherTarget.gx, command.gatherTarget.gy);
@@ -2413,6 +2531,7 @@ function applyCommand(unit, command) {
       unit.buildTarget = command.buildTargetId;
       unit.target = null;
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.gatherTarget = null;
       unit.lastGatherTarget = null;
       const bgx = Math.floor(building.x / CELL);
@@ -2424,6 +2543,7 @@ function applyCommand(unit, command) {
       unit.state = 'patrol';
       unit.target = null;
       unit.attackTarget = null;
+      unit._attackMoveTarget = null;
       unit.gatherTarget = null;
       unit.lastGatherTarget = null;
       unit.buildTarget = null;
@@ -2445,6 +2565,8 @@ function isCommandValid(command, unit) {
   switch (command.type) {
     case 'move':
       return true;
+    case 'attackMove':
+      return !!command.targetGrid;
     case 'patrol': {
       if (!command.targetGrid) return false;
       const { gx, gy } = command.targetGrid;
@@ -2516,6 +2638,7 @@ function stopSelectedUnits() {
     unit.path = [];
     unit.target = null;
     unit.attackTarget = null;
+    unit._attackMoveTarget = null;
     unit.gatherTarget = null;
     unit.buildTarget = null;
     clearPatrol(unit);
@@ -2644,7 +2767,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
     } else {
       // 立即执行：对移动指令计算阵型偏移
       let cmd = command;
-      if (command.type === 'move' || command.type === 'patrol') {
+      if (command.type === 'move' || command.type === 'attackMove' || command.type === 'patrol') {
         const row = Math.floor(i / cols);
         const col = i % cols;
         cmd = { type: command.type, targetGrid: clampGrid(gx + col, gy + row) };
@@ -2666,7 +2789,7 @@ function issueCommand(mx, my, isShiftHeld = false) {
     addLog(commandLog.immediate);
   }
 
-  if (command.type === 'move' || command.type === 'gather' || command.type === 'build' || command.type === 'patrol') {
+  if (command.type === 'move' || command.type === 'attackMove' || command.type === 'gather' || command.type === 'build' || command.type === 'patrol') {
     AudioManager.move();
   }
   if (game.commandMode) {
@@ -2871,7 +2994,9 @@ window.addEventListener('keydown', (e) => {
   }
 
   if (e.key === 'Escape') {
-    if (game.commandMode) {
+    if (game.attackMoveMode) {
+      setAttackMoveMode(false);
+    } else if (game.commandMode) {
       game.commandMode = null;
       updateSidebar();
     } else if (game.buildMode) {
@@ -2886,6 +3011,21 @@ window.addEventListener('keydown', (e) => {
     }
     e.preventDefault();
     return;
+  }
+
+  if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.altKey) {
+    const hasSelectedUnit = game.selected
+      .map(id => entities.find(en => en.id === id))
+      .some(en => en && en.kind === 'unit' && en.team === TEAM_PLAYER);
+    if (hasSelectedUnit) {
+      e.preventDefault();
+      game.keysDown[e.key] = false;
+      if (game.buildMode) cancelBuild();
+      if (game.commandMode) game.commandMode = null;
+      setAttackMoveMode(true, e.shiftKey);
+      addLog(e.shiftKey ? '⚔️ 选择攻击移动目标（排队）' : '⚔️ 选择攻击移动目标');
+      return;
+    }
   }
 
   if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.altKey && !e.metaKey && game.selected.length > 0) {
