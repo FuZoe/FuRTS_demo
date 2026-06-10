@@ -235,7 +235,7 @@ function render() {
     }
   }
 
-  // 排队路径线渲染：每个选中单位画各自的路径线，但黄点只画一次（取第一个单位的目标作为共享路标）
+  // 排队路径线渲染：每个选中单位按自己的当前任务和队列绘制路径线
   {
     const selectedWithQueue = game.selected
       .map(id => entities.find(en => en.id === id))
@@ -255,50 +255,56 @@ function render() {
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
 
-      const leader = selectedWithQueue[0];
-      const waypoints = [];
+      const getUnitWaypoints = (unit) => {
+        const waypoints = [];
 
-      if ((leader.state === 'move' || leader.state === 'attackMove') && leader.target) {
-        const type = leader.state === 'attackMove' ? 'attackMove' : 'move';
-        waypoints.push({ x: leader.target.x - camera.x, y: leader.target.y - camera.y, color: colorForCommand(type) });
-      } else if (leader.state === 'attack' && leader.attackTarget) {
-        const at = entities.find(t => t.id === leader.attackTarget);
-        if (at) waypoints.push({ x: at.x - camera.x, y: at.y - camera.y, color: colorForCommand('attack') });
-      } else if (leader.state === 'gather' && leader.gatherTarget) {
-        waypoints.push({
-          x: leader.gatherTarget.gx * CELL + CELL / 2 - camera.x,
-          y: leader.gatherTarget.gy * CELL + CELL / 2 - camera.y,
-          color: colorForCommand('gather'),
-        });
-      } else if (leader.state === 'build' && leader.buildTarget) {
-        const bt = entities.find(b => b.id === leader.buildTarget);
-        if (bt) waypoints.push({ x: bt.x - camera.x, y: bt.y - camera.y, color: colorForCommand('build') });
-      }
+        if ((unit.state === 'move' || unit.state === 'attackMove') && unit.target) {
+          const type = unit.state === 'attackMove' ? 'attackMove' : 'move';
+          waypoints.push({ x: unit.target.x - camera.x, y: unit.target.y - camera.y, color: colorForCommand(type) });
+        } else if (unit.state === 'attack' && unit.attackTarget) {
+          const at = entities.find(t => t.id === unit.attackTarget);
+          if (at) waypoints.push({ x: at.x - camera.x, y: at.y - camera.y, color: colorForCommand('attack') });
+        } else if (unit.state === 'gather' && unit.gatherTarget) {
+          waypoints.push({
+            x: unit.gatherTarget.gx * CELL + CELL / 2 - camera.x,
+            y: unit.gatherTarget.gy * CELL + CELL / 2 - camera.y,
+            color: colorForCommand('gather'),
+          });
+        } else if (unit.state === 'build' && unit.buildTarget) {
+          const bt = entities.find(b => b.id === unit.buildTarget);
+          if (bt) waypoints.push({ x: bt.x - camera.x, y: bt.y - camera.y, color: colorForCommand('build') });
+        }
 
-      for (const cmd of leader.actionQueue) {
-        let nx, ny;
-        const color = colorForCommand(cmd.type);
-        if (cmd.type === 'move' || cmd.type === 'attackMove' || cmd.type === 'patrol') {
-          nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
-          ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
-        } else if (cmd.type === 'attack') {
-          const at = entities.find(t => t.id === cmd.targetId);
-          if (!at) continue;
-          nx = at.x - camera.x; ny = at.y - camera.y;
-        } else if (cmd.type === 'gather') {
-          nx = cmd.gatherTarget.gx * CELL + CELL / 2 - camera.x;
-          ny = cmd.gatherTarget.gy * CELL + CELL / 2 - camera.y;
-        } else if (cmd.type === 'build') {
-          const bt = entities.find(b => b.id === cmd.buildTargetId);
-          if (!bt) continue;
-          nx = bt.x - camera.x; ny = bt.y - camera.y;
-        } else { continue; }
-        waypoints.push({ x: nx, y: ny, color });
-      }
+        for (const cmd of unit.actionQueue) {
+          let nx, ny;
+          const color = colorForCommand(cmd.type);
+          if (cmd.type === 'move' || cmd.type === 'attackMove' || cmd.type === 'patrol') {
+            nx = cmd.targetGrid.gx * CELL + CELL / 2 - camera.x;
+            ny = cmd.targetGrid.gy * CELL + CELL / 2 - camera.y;
+          } else if (cmd.type === 'attack') {
+            const at = entities.find(t => t.id === cmd.targetId);
+            if (!at) continue;
+            nx = at.x - camera.x; ny = at.y - camera.y;
+          } else if (cmd.type === 'gather') {
+            nx = cmd.gatherTarget.gx * CELL + CELL / 2 - camera.x;
+            ny = cmd.gatherTarget.gy * CELL + CELL / 2 - camera.y;
+          } else if (cmd.type === 'build') {
+            const bt = entities.find(b => b.id === cmd.buildTargetId);
+            if (!bt) continue;
+            nx = bt.x - camera.x; ny = bt.y - camera.y;
+          } else { continue; }
+          waypoints.push({ x: nx, y: ny, color });
+        }
+
+        return waypoints;
+      };
+
+      const waypointMarkers = new Map();
 
       for (const unit of selectedWithQueue) {
         let prevX = unit.x - camera.x;
         let prevY = unit.y - camera.y;
+        const waypoints = getUnitWaypoints(unit);
 
         for (const wp of waypoints) {
           ctx.strokeStyle = wp.color;
@@ -308,10 +314,11 @@ function render() {
           ctx.stroke();
           prevX = wp.x;
           prevY = wp.y;
+          waypointMarkers.set(`${wp.x},${wp.y},${wp.color}`, wp);
         }
       }
 
-      for (const wp of waypoints) {
+      for (const wp of waypointMarkers.values()) {
         ctx.fillStyle = wp.color;
         ctx.beginPath();
         ctx.arc(wp.x, wp.y, 4, 0, Math.PI * 2);
